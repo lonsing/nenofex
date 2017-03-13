@@ -2,7 +2,7 @@
  This file is part of Nenofex.
 
  Nenofex, an expansion-based QBF solver for negation normal form.        
- Copyright 2008, 2012 Florian Lonsing.
+ Copyright 2008, 2012, 2017 Florian Lonsing.
 
  Nenofex is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -20,16 +20,47 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <string.h>
 #include <stdlib.h>
 #include "mem.h"
 
+struct MemManager
+{
+  size_t cur_bytes;
+  size_t max_bytes;
+};
 
-static size_t cur_bytes = 0;
-static size_t max_bytes = 0;
+static void
+mem_check (MemManager *mm)
+{
+  if (mm->cur_bytes)
+    {
+      fprintf (stderr, "ERROR - mem: cur_bytes = %ld, but expected 0!\n",
+               (long unsigned int) mm->cur_bytes);
+      abort ();
+    }
+}
 
+/* --------- START: API FUNCTIONS --------- */
+
+MemManager * 
+memmanager_create ()
+{
+  MemManager *mm = (MemManager *) malloc (sizeof (MemManager));
+  memset (mm, 0, sizeof (MemManager));
+  return mm;
+}
+
+void 
+memmanager_delete (MemManager *mm)
+{
+  /* Leak check. */
+  mem_check (mm);
+  free (mm);
+}
 
 void *
-mem_malloc (size_t bytes)
+mem_malloc (MemManager *mm, size_t bytes)
 {
   void *result;
 
@@ -40,35 +71,35 @@ mem_malloc (size_t bytes)
       fprintf (stderr, "ERROR - mem: malloc failed!\n");
       abort ();
     }
-  cur_bytes += bytes;
+  mm->cur_bytes += bytes;
 
-  if (cur_bytes > max_bytes)
-    max_bytes = cur_bytes;
+  if (mm->cur_bytes > mm->max_bytes)
+    mm->max_bytes = mm->cur_bytes;
 
   return result;
 }
 
 
 void *
-mem_realloc (void *ptr, size_t old_bytes, size_t new_bytes)
+mem_realloc (MemManager *mm, void *ptr, size_t old_bytes, size_t new_bytes)
 {
   void *result;
 
   if (!ptr)
     {
       assert (!old_bytes);
-      return mem_malloc (new_bytes);
+      return mem_malloc (mm, new_bytes);
     }
 
   if (!new_bytes)
     {
-      mem_free (ptr, old_bytes);
+      mem_free (mm, ptr, old_bytes);
       return 0;
     }
 
-  assert (cur_bytes >= old_bytes);
-  cur_bytes -= old_bytes;
-  cur_bytes += new_bytes;
+  assert (mm->cur_bytes >= old_bytes);
+  mm->cur_bytes -= old_bytes;
+  mm->cur_bytes += new_bytes;
   result = realloc (ptr, new_bytes);
 
   if (!result)
@@ -77,15 +108,15 @@ mem_realloc (void *ptr, size_t old_bytes, size_t new_bytes)
       abort ();
     }
 
-  if (cur_bytes > max_bytes)
-    max_bytes = cur_bytes;
+  if (mm->cur_bytes > mm->max_bytes)
+    mm->max_bytes = mm->cur_bytes;
 
   return result;
 }
 
 
 void
-mem_free (void *ptr, size_t bytes)
+mem_free (MemManager *mm, void *ptr, size_t bytes)
 {
   if (!ptr)
     {
@@ -93,33 +124,24 @@ mem_free (void *ptr, size_t bytes)
       abort ();
     }
 
-  assert (cur_bytes >= bytes);
+  assert (mm->cur_bytes >= bytes);
   free (ptr);
-  cur_bytes -= bytes;
+  mm->cur_bytes -= bytes;
 }
 
 
 size_t
-get_cur_bytes ()
+get_cur_bytes (MemManager *mm)
 {
-  return cur_bytes;
+  return mm->cur_bytes;
 }
 
 
 size_t
-get_max_bytes ()
+get_max_bytes (MemManager *mm)
 {
-  return max_bytes;
+  return mm->max_bytes;
 }
 
+/* --------- END: API FUNCTIONS --------- */
 
-void
-mem_check ()
-{
-  if (cur_bytes)
-    {
-      fprintf (stderr, "ERROR - mem: cur_bytes = %ld, but expected 0!\n",
-               cur_bytes);
-      abort ();
-    }
-}

@@ -2,7 +2,7 @@
  This file is part of Nenofex.
 
  Nenofex, an expansion-based QBF solver for negation normal form.        
- Copyright 2008, 2012 Florian Lonsing.
+ Copyright 2008, 2012, 2017 Florian Lonsing.
 
  Nenofex is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -19,18 +19,17 @@
 */
 
 #include "stack.h"
-#include "mem.h"
 #include <assert.h>
 #include <stdlib.h>
 
 
 Stack *
-create_stack (unsigned int size)
+create_stack (MemManager *mm, unsigned int size)
 {
-  Stack *stack = (Stack *) mem_malloc (sizeof (Stack));
+  Stack *stack = (Stack *) mem_malloc (mm, sizeof (Stack));
   assert (stack);
   size = size ? size : 1;
-  stack->elems = (void **) mem_malloc (size * sizeof (void *));
+  stack->elems = (void **) mem_malloc (mm, size * sizeof (void *));
   assert (stack->elems);
   stack->top = stack->elems;
   stack->end = stack->elems + size;
@@ -39,10 +38,10 @@ create_stack (unsigned int size)
 
 
 void
-delete_stack (Stack * stack)
+delete_stack (MemManager *mm, Stack * stack)
 {
-  mem_free (stack->elems, size_stack (stack) * sizeof (void *));
-  mem_free (stack, sizeof (Stack));
+  mem_free (mm, stack->elems, size_stack (stack) * sizeof (void *));
+  mem_free (mm, stack, sizeof (Stack));
 }
 
 
@@ -61,7 +60,7 @@ size_stack (Stack * stack)
 
 
 static void
-enlarge_stack (Stack * stack)
+enlarge_stack (MemManager *mm, Stack * stack)
 {
   assert (count_stack (stack) == size_stack (stack));
   assert (size_stack (stack));
@@ -71,7 +70,7 @@ enlarge_stack (Stack * stack)
   unsigned int new_size = size_stack (stack) * 2;
   unsigned int old_count = count_stack (stack);
   stack->elems =
-    mem_realloc (stack->elems, size_stack (stack) * sizeof (void *),
+    mem_realloc (mm, stack->elems, size_stack (stack) * sizeof (void *),
                  new_size * sizeof (void *));
   stack->top = stack->elems + old_count;
   stack->end = stack->elems + new_size;
@@ -79,14 +78,14 @@ enlarge_stack (Stack * stack)
 
 
 void
-push_stack (Stack * stack, void *elem)
+push_stack (MemManager *mm, Stack * stack, void *elem)
 {
   assert (stack->top < stack->end);
 
   *stack->top = elem;
   stack->top++;
   if (stack->top == stack->end)
-    enlarge_stack (stack);
+    enlarge_stack (mm, stack);
 }
 
 

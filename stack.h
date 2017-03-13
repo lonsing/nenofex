@@ -2,7 +2,7 @@
  This file is part of Nenofex.
 
  Nenofex, an expansion-based QBF solver for negation normal form.        
- Copyright 2008, 2012 Florian Lonsing.
+ Copyright 2008, 2012, 2017 Florian Lonsing.
 
  Nenofex is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -21,6 +21,8 @@
 #ifndef _STACK_H_
 #define _STACK_H_
 
+#include "mem.h"
+
 typedef struct Stack Stack;
 
 struct Stack
@@ -30,11 +32,11 @@ struct Stack
   void **end;
 };
 
-Stack *create_stack (unsigned int size);
+Stack *create_stack (MemManager *, unsigned int size);
 
-void delete_stack (Stack * stack);
+void delete_stack (MemManager *, Stack * stack);
 
-void push_stack (Stack * stack, void *elem);
+void push_stack (MemManager *, Stack * stack, void *elem);
 
 void *pop_stack (Stack * stack);
 

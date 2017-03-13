@@ -2,7 +2,7 @@
  This file is part of Nenofex.
 
  Nenofex, an expansion-based QBF solver for negation normal form.        
- Copyright 2008, 2012 Florian Lonsing.
+ Copyright 2008, 2012, 2017 Florian Lonsing.
 
  Nenofex is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -23,17 +23,20 @@
 
 #include <stddef.h>
 
+typedef struct MemManager MemManager;
 
-void *mem_malloc (size_t bytes);
+MemManager * memmanager_create ();
 
-void mem_free (void *ptr, size_t bytes);
+void memmanager_delete (MemManager *);
 
-void *mem_realloc (void *ptr, size_t old_bytes, size_t new_bytes);
+void *mem_malloc (MemManager *, size_t);
 
-size_t get_cur_bytes ();
+void mem_free (MemManager *, void *, size_t);
 
-size_t get_max_bytes ();
+void *mem_realloc (MemManager *, void *, size_t, size_t);
 
-void mem_check ();
+size_t get_cur_bytes (MemManager *);
+
+size_t get_max_bytes (MemManager *);
 
 #endif /* _MEM_H_ */

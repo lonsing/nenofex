@@ -1,30 +1,24 @@
-July 2012
+March 2017
 
 -------------------
 GENERAL INFORMATION
 -------------------
 
-This is version 1.0 of Nenofex ("NEgation NOrmal Form EXpansion"), an
-expansion-based QBF solver which operates on negation normal form (NNF). A
-formula in NNF is represented as a structurally restricted tree. Expansions of
-variables from the two rightmost quantifier blocks are scheduled based on
-estimated expansion costs. Further information can be found in our SAT'08
-paper:
+This is Nenofex ("NEgation NOrmal Form EXpansion"), an expansion-based QBF
+solver which operates on negation normal form (NNF). A formula in NNF is
+represented as a structurally restricted tree. Expansions of variables from
+the two rightmost quantifier blocks are scheduled based on estimated expansion
+costs. Further information can be found in our SAT'08 paper:
 
-@inproceedings{DBLP:conf/sat/LonsingB08,
-  author    = {Florian Lonsing and
-               Armin Biere},
-  title     = {Nenofex: Expanding NNF for QBF Solving},
-  booktitle = {SAT},
-  year      = {2008},
-  pages     = {196-210},
-  ee        = {http://dx.doi.org/10.1007/978-3-540-79719-7_19},
-  crossref  = {DBLP:conf/sat/2008},
-  bibsource = {DBLP, http://dblp.uni-trier.de}
-}
+Florian Lonsing, Armin Biere: Nenofex: Expanding NNF for QBF
+Solving. Proceedings of SAT 2008, volume 4996 of LNCS, Springer, 2008.
 
-Nenofex is no longer actively developed. For bug reports, please contact
-Florian Lonsing (see below).
+Version 1.1 is a maintenance release:
+ - added simple API to enable library use
+ - added support for most recent versions of PicoSAT solver
+
+Apart from code maintenance, Nenofex is no longer actively developed. For bug
+reports, please contact Florian Lonsing (see below).
 
 
 ------------
@@ -33,9 +27,9 @@ INSTALLATION
 
 Create a new directory DIR.
 
-Download a recent source package of PicoSAT from
-http://fmv.jku.at/picosat/ copy it to DIR and unpack it. (Installation
-should work with 'picosat-936.tar.gz', for example)
+Download the latest source package of PicoSAT from http://fmv.jku.at/picosat/
+copy it to DIR and unpack it. Installation should work with version 965 or any
+later version.
 
 In the directory of PicoSAT, call './configure -O -static' and then
 'make'.
@@ -60,6 +54,25 @@ command line parameters results in default behaviour.
 The solver returns exit code 10 if the given instance was found satisfiable
 and exit code 20 if the instance was found unsatisfiable. Any other exit code
 indicates that the instance was not solved.
+
+The subdirectory 'test' contains example programs that demonstrate the use of
+the library of Nenofex.
+
+-------
+License
+-------
+
+DepQBF is free software released under GPLv3:
+
+https://www.gnu.org/copyleft/gpl.html
+
+See also the file COPYING.
+
+Nenofex uses the SAT solver PicoSAT as an external library.
+
+http://fmv.jku.at/picosat/
+
+Please see the license of PicoSAT for further information.
 
 
 -------

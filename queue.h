@@ -2,7 +2,7 @@
  This file is part of Nenofex.
 
  Nenofex, an expansion-based QBF solver for negation normal form.        
- Copyright 2008, 2012 Florian Lonsing.
+ Copyright 2008, 2012, 2017 Florian Lonsing.
 
  Nenofex is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -21,6 +21,8 @@
 #ifndef _QUEUE_H_
 #define _QUEUE_H_
 
+#include "mem.h"
+
 typedef struct Queue Queue;
 
 struct Queue
@@ -32,18 +34,18 @@ struct Queue
 };
 
 
-Queue *create_queue (unsigned int size);
+Queue *create_queue (MemManager *, unsigned int);
 
-void delete_queue (Queue * queue);
+void delete_queue (MemManager *, Queue *);
 
-void enqueue (Queue * queue, void *elem);
+void enqueue (MemManager *, Queue *, void *);
 
-void *dequeue (Queue * queue);
+void *dequeue (Queue *);
 
-unsigned int size_queue (Queue * queue);
+unsigned int size_queue (Queue *);
 
-unsigned int count_queue (Queue * queue);
+unsigned int count_queue (Queue *);
 
-void reset_queue (Queue * queue);
+void reset_queue (Queue *);
 
 #endif /* _QUEUE_H_ */

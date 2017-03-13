@@ -2,7 +2,7 @@
  This file is part of Nenofex.
 
  Nenofex, an expansion-based QBF solver for negation normal form.        
- Copyright 2008, 2012 Florian Lonsing.
+ Copyright 2008, 2012, 2017 Florian Lonsing.
 
  Nenofex is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -21,21 +21,21 @@
 #ifndef _NENOFEX_TYPES_H_
 #define _NENOFEX_TYPES_H_
 
+#include "../picosat/picosat.h"
+#include "mem.h"
 #include "stack.h"
 #include "queue.h"
+#include "nenofex.h"
 
 typedef struct Node Node;
 typedef struct Var Var;
-typedef struct Nenofex Nenofex;
 typedef struct Lit Lit;
 typedef enum NodeType NodeType;
-typedef enum NenofexResult NenofexResult;
 typedef struct LevelLink LevelLink;
 typedef struct OccurrenceLink OccurrenceLink;
 typedef struct ChildList ChildList;
 typedef struct OccurrenceList OccurrenceList;
 typedef struct Scope Scope;
-typedef enum ScopeType ScopeType;
 typedef struct LCAObject LCAObject;
 typedef enum VarAssignment VarAssignment;
 typedef struct SameLCALink SameLCALink;
@@ -75,13 +75,6 @@ enum NodeType
 #define is_operator_node(node) ((node)->type != NODE_TYPE_LITERAL)
 #define is_or_node(node) ((node)->type == NODE_TYPE_OR)
 #define is_and_node(node) ((node)->type == NODE_TYPE_AND)
-
-enum NenofexResult
-{
-  NENOFEX_RESULT_UNKNOWN = 0,
-  NENOFEX_RESULT_SAT = 10,
-  NENOFEX_RESULT_UNSAT = 20
-};
 
 /*
 - all children of a node are linked
@@ -212,14 +205,29 @@ struct Var
 
 struct Nenofex
 {
+  MemManager *mm;
+  PicoSAT *picosat;
+  /* Keeping track of first two added clauses for special cases in
+     graph simplification. */
+  Node *first_added_clause;
+  Node *second_added_clause;
+  unsigned int preamble_set_up:1;
+  /* Must not call 'solve' function multiple time. */
+  unsigned int solve_called:1;
+  unsigned int post_formula_addition_simplified:1;
+  unsigned int empty_clause_added:1;
   unsigned int num_orig_vars;
   unsigned int num_orig_clauses;
+  unsigned int num_added_clauses;
   unsigned int num_cur_remaining_scope_vars;
   unsigned int next_free_node_id;
   Var **vars;
   Node *graph_root;
   NenofexResult result;
   Stack *scopes;
+
+  /* Graph size at start of solving process. */
+  unsigned int init_graph_size;
 
   Var *cur_expanded_var;
   Node *existential_split_or;   /* for post-expansion flattening only */
@@ -294,6 +302,8 @@ struct Nenofex
 
     int num_total_lca_parent_visits;
     int num_total_lca_algo_calls;
+
+    unsigned long long sat_solver_decisions;
   } stats;
 
   struct
@@ -337,7 +347,15 @@ struct Nenofex
     int print_assignment_specified;
     int cnf_generator_tseitin_specified;
     int cnf_generator_tseitin_revised_specified;
-    unsigned int max_time;
+    /* Decision limit for SAT solver called in the end. */
+    int sat_solver_dec_limit;
+    /* Limit (factor) on the absolute size of the graph, which is different
+       from 'size_cutoff' or 'cost_cutoff' limits, which allow to bound the
+       growth of the graph after expansions. Cut off will occur if the current
+       graph size after expansions is larger than 'initial_graph *
+       abs_graph_size_cutoff', where 'initial_graph' is the size at the beginning
+       of the expansion phase. */
+    float abs_graph_size_cutoff;
   } options;
 
   double start_time;
@@ -388,12 +406,6 @@ struct Node
 /* #ifndef NDEBUG */
   unsigned int mark3:1;
 /* #endif */
-};
-
-enum ScopeType
-{
-  SCOPE_TYPE_EXISTENTIAL = 1,
-  SCOPE_TYPE_UNIVERSAL = 2
 };
 
 #define is_existential_scope(scope) ((scope)->type == SCOPE_TYPE_EXISTENTIAL)
@@ -469,7 +481,7 @@ void collect_variable_for_update (Nenofex * nenofex, Var * var);
 
 int simplify_by_global_flow_and_atpg_main (Nenofex * nenofex);
 
-ATPGRedundancyRemover *create_atpg_redundancy_remover ();
+ATPGRedundancyRemover *create_atpg_redundancy_remover (MemManager *mm);
 
 void free_atpg_redundancy_remover (ATPGRedundancyRemover * atpg_rr);
 
@@ -538,6 +550,7 @@ struct ATPGInfo
 
 struct ATPGRedundancyRemover
 {
+  MemManager *mm;
   Queue *fault_queue;
   Queue *propagation_queue;
   unsigned int conflict;

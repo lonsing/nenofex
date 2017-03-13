@@ -2,7 +2,7 @@
  This file is part of Nenofex.
 
  Nenofex, an expansion-based QBF solver for negation normal form.        
- Copyright 2008, 2012 Florian Lonsing.
+ Copyright 2008, 2012, 2017 Florian Lonsing.
 
  Nenofex is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -34,91 +34,16 @@
 #include "stack.h"
 #include "mem.h"
 
-
-#define VERSION						\
-  "Nenofex 1.0\n"					\
-  "Copyright 2008, 2012 Florian Lonsing.\n"	\
-"This is free software; see COPYING for copying conditions.\n"		\
-"There is NO WARRANTY, to the extent permitted by law.\n"
-
-
-#define USAGE \
-"usage: nenofex [<option> ...] [ <in-file> ]\n"\
-"\n"\
-"where <in-file> is a file in (Q)DIMACS format and <option> is any of the following:\n\n\n"\
-"Printing Information:\n"\
-"---------------------\n\n"\
-"  -h | -help			print usage information\n"\
-"  --version                     print version\n"\
-"  -v				verbose output (default: only QDIMACS output)\n"\
-"  --show-progress		print short summary after each expansion step\n"\
-"  --show-graph-size		print graph size after each expansion step\n\n\n"\
-"SAT Solving:\n"\
-"------------\n\n"\
-"  --no-sat-solving		never call internal SAT-solver even if formula is\n"\
-"				  purely existential/universal\n"\
-"  --verbose-sat-solving 	enable verbosity mode during SAT-solving\n"\
-"  --dump-cnf			print generated CNF (if any) to 'stdout'\n"\
-"	       			  (may be combined with '--no-sat-solving')\n"\
-"  --cnf-generator=<cnf-gen>	set NNF-to-CNF generator where <cnf-gen> is either \n"\
-"				  'tseitin' or 'tseitin_revised' (default)\n\n\n"\
-"Expansion:\n"\
-"----------\n\n"\
-"  --full-expansion		do not stop expanding variables even if formula is\n"\
-"				  purely existential/universal\n"\
-"  -n <val>			expand at most <val> variables where \n"\
-"				  <val> is a positive integer\n"\
-"  --size-cutoff=<val>		stop expanding if graph size after an expansion\n"\
-"				  step has grown faster than specified where\n" \
-"				  <val> is either\n"\
-"				    - a floating point value between -1.0 and 1.0\n"\
-"		       		      and cutoff occurs if 'new_size > old_size * (1 + <val>)'\n"\
-"				  or\n"\
-"				    - an integer and cutoff occurs if 'new_size > (old_size + <val>)'\n"\
-"  --cost-cutoff=<val>		stop expanding if predicted minimal expansion\n"\
-"				  costs exceed <val> where val is an integer\n\n\n"\
-"  --univ-trigger=<val>	       	enable non-inner universal expansion if tree has grown\n"\
-"				  faster than <val> (default: 10) nodes in last exist. expansion\n"\
-"  --univ-delta=<val>	       	increase universal trigger by <val> after \n"\
-"				  universal expansion (default: 10)\n"\
-"  --post-expansion-flattening	affects the following situation only: \n"\
-"				  existential variable 'x' has AND-LCA and either\n"\
-"				  has exactly one positive occurrence and <n> negative \n"\
-"				  ones or vice versa, or variable 'x' has exactly two\n"\
-"				  positive and two negative occurrences -> flatten subgraph\n"\
-"				  rooted at 'split-OR' by multiplying out clauses\n\n\n" \
-"Optimizations:\n"\
-"--------------\n\n"\
-"  --show-opt-info		print short info after calls of optimizations\n"\
-"  --opt-subgraph-limit=<val>	impose size limit <val> (default: 500) on\n"\
-"				  subgraph where optimizations are carried out\n"\
-"  --no-optimizations		do not optimize by global flow and redundancy removal\n"\
-"  --no-atpg			do not optimize by ATPG redundancy removal\n"\
-"				  (overruled by '--no-optimizations')\n"\
-"  --no-global-flow		do not optimize by global flow\n"\
-"				  (overruled by '--no-optimizations')\n"\
-"  --propagation-limit=<val>	set hard propagation limit in optimizations (see below)"\
-"\n\n\n"\
-"REMARKS:\n\n"\
-"  - For calling the solver on a CNF, you should specify '--full-expansion'\n\n"\
-"  - If '-n <val>' is specified the solver will - if possible - forward a CNF\n"\
-"      to the internal SAT solver unless '--no-sat-solving' is specified\n\n"\
-"  - Options '--size-cutoff=<val>', '--cost-cutoff=<val>' and '-n <val>' may be combined\n\n"\
-"  - Option '--propagation-limit=<val>' will set a limit for global flow optimization\n"\
-"      and redundancy removal separately, i.e. both optimizations may perform <val>\n"\
-"      propagations. If this option is omitted (default) then a built-in limit will\n"\
-"      be set depending on the size of the formula subject to optimization\n\n"
-
-
 /*
 - wrapper-macros for calling internal SAT-solver
 */
-#define sat_solver_init() (picosat_init())
-#define sat_solver_verbosity_mode() (picosat_enable_verbosity())
-#define sat_solver_reset() (picosat_reset())
-#define sat_solver_add(lit) (picosat_add((lit)))
-#define sat_solver_sat() (picosat_sat(-1))
-#define sat_solver_deref(lit) (picosat_deref(lit))
+#define sat_solver_init(N) ((N)->picosat = picosat_init())
+#define sat_solver_verbosity_mode(N) (picosat_set_verbosity((N)->picosat, 1))
+#define sat_solver_reset(N) (picosat_reset((N)->picosat))
+#define sat_solver_add(N,lit) (picosat_add((N)->picosat,(lit)))
+#define sat_solver_sat(N) (picosat_sat((N)->picosat,(N)->options.sat_solver_dec_limit > 0 ? \
+                                       (N)->options.sat_solver_dec_limit : -1))
+#define sat_solver_deref(N,lit) (picosat_deref((N)->picosat,lit))
 #define SAT_SOLVER_RESULT_UNKNOWN PICOSAT_UNKNOWN
 #define SAT_SOLVER_RESULT_SATISFIABLE PICOSAT_SATISFIABLE
 #define SAT_SOLVER_RESULT_UNSATISFIABLE PICOSAT_UNSATISFIABLE
@@ -241,6 +166,7 @@
 
 
 /* optional statistics */
+#define COMPUTE_MAX_TREE_SIZE 1
 #if 0
 #define COMPUTE_NUM_DELETED_NODES 1
 #define COMPUTE_NUM_NON_INC_EXPANSIONS_IN_SCORES 1
@@ -250,7 +176,6 @@
 #define COMPUTE_NUM_UNITS 1
 #define COMPUTE_NUM_UNATES 1
 #define COMPUTE_NUM_TOTAL_CREATED_NODES 1
-#define COMPUTE_MAX_TREE_SIZE 1
 #define COMPUTE_LCA_PARENT_VISITS 1
 #endif
 /* END: OPTIONAL STATISTICS */
@@ -342,26 +267,26 @@
 /* ---------- START: PRIORITY QUEUE ---------- */
 
 static void
-create_priority_queue (Stack ** priority_heap, unsigned int init_capacity)
+create_priority_queue (MemManager *mm, Stack ** priority_heap, unsigned int init_capacity)
 {
-  *priority_heap = create_stack (init_capacity);
+  *priority_heap = create_stack (mm, init_capacity);
 }
 
 
 static void
-delete_priority_queue (Stack ** priority_heap)
+delete_priority_queue (MemManager *mm, Stack ** priority_heap)
 {
-  delete_stack (*priority_heap);
+  delete_stack (mm, *priority_heap);
   *priority_heap = 0;
 }
 
 
 static void
-add_fast_priority_queue (Stack * priority_heap, Var * var)
+add_fast_priority_queue (MemManager *mm, Stack * priority_heap, Var * var)
 {
   assert (var->priority_pos == -1);
 
-  push_stack (priority_heap, var);
+  push_stack (mm, priority_heap, var);
   var->priority_pos = count_stack (priority_heap) - 1;
 
   assert (var->priority_pos >= 0);
@@ -770,33 +695,12 @@ collect_variable_for_update (Nenofex * nenofex, Var * var)
   if (!var->collected_for_update && var->scope == *nenofex->cur_scope)
     {
       var->collected_for_update = 1;
-      push_stack (nenofex->vars_marked_for_update, var);
+      push_stack (nenofex->mm, nenofex->vars_marked_for_update, var);
     }
 }
 
 
-static void init_lca_object (LCAObject * lca_object);
-
-
-static Nenofex *
-create_nenofex ()
-{
-  size_t num_bytes = sizeof (Nenofex);
-  Nenofex *result = mem_malloc (num_bytes);
-  assert (result);
-  memset (result, 0, num_bytes);
-
-  result->scopes = create_stack (DEFAULT_STACK_SIZE);
-  result->unates = create_stack (DEFAULT_STACK_SIZE);
-  result->depending_vars = create_stack (DEFAULT_STACK_SIZE);
-  result->vars_marked_for_update = create_stack (DEFAULT_STACK_SIZE);
-  result->atpg_rr = create_atpg_redundancy_remover ();
-
-  init_lca_object (&(result->changed_subformula));
-
-  return result;
-}
-
+static void init_lca_object (Nenofex * nenofex, LCAObject * lca_object);
 
 static void delete_node (Nenofex * nenofex, Node * node);
 
@@ -808,12 +712,13 @@ static void
 free_graph (Nenofex * nenofex)
 {
   assert (nenofex);
+  MemManager *mm = nenofex->mm;
 
   if (!nenofex->graph_root)
     return;
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (mm, DEFAULT_STACK_SIZE);
+  push_stack (mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -823,64 +728,28 @@ free_graph (Nenofex * nenofex)
           Node *ch;
           for (ch = cur->child_list.last; ch; ch = ch->level_link.prev)
             {
-              push_stack (stack, ch);
+              push_stack (mm, stack, ch);
             }
         }
 
       if (cur->lca_child_list_occs)
         {
-          delete_stack (cur->lca_child_list_occs);
+          delete_stack (mm, cur->lca_child_list_occs);
           assert (cur->pos_in_lca_children);
-          delete_stack (cur->pos_in_lca_children);
+          delete_stack (mm, cur->pos_in_lca_children);
         }
 
-      mem_free (cur, sizeof (Node));
+      mem_free (mm, cur, sizeof (Node));
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (mm, stack);
 }
 
 
-static void free_lca_children (LCAObject * lca_object);
+static void free_lca_children (Nenofex *nenofex, LCAObject * lca_object);
 
 
-static void delete_scope (Scope * scope);
-
-
-static void
-free_nenofex (Nenofex * nenofex)
-{
-  assert (!nenofex->vars);
-
-  free_graph (nenofex);
-
-  free_lca_children (&(nenofex->changed_subformula));
-
-  Scope *scope;
-  while ((scope = pop_stack (nenofex->scopes)))
-    {
-      Var *var;
-      while ((var = pop_stack (scope->vars)))
-        {
-          delete_stack (var->pos_in_lca_child_list_occs);
-          free_lca_children (&(var->exp_costs.lca_object));
-          assert (!var->subformula_pos_occs);
-          assert (!var->subformula_neg_occs);
-          mem_free (var, sizeof (Var));
-        }
-      delete_scope (scope);
-    }
-  delete_stack (nenofex->scopes);
-
-  delete_stack (nenofex->unates);
-  delete_stack (nenofex->vars_marked_for_update);
-  delete_stack (nenofex->depending_vars);
-
-  free_atpg_redundancy_remover (nenofex->atpg_rr);
-
-  mem_free (nenofex, sizeof (Nenofex));
-}
-
+static void delete_scope (Nenofex *nenofex, Scope * scope);
 
 /*
 - create new AND-operator node
@@ -896,7 +765,7 @@ and_node (Nenofex * nenofex)
 #endif
 
   size_t num_bytes = sizeof (Node);
-  Node *result = mem_malloc (num_bytes);
+  Node *result = mem_malloc (nenofex->mm, num_bytes);
   assert (result);
   memset (result, 0, num_bytes);
 
@@ -921,7 +790,7 @@ or_node (Nenofex * nenofex)
 #endif
 
   size_t num_bytes = sizeof (Node);
-  Node *result = mem_malloc (num_bytes);
+  Node *result = mem_malloc (nenofex->mm, num_bytes);
   assert (result);
   memset (result, 0, num_bytes);
 
@@ -946,7 +815,7 @@ lit_node (Nenofex * nenofex, int lit, Var * var)
 #endif
 
   size_t num_bytes = sizeof (Node);
-  Node *result = (Node *) mem_malloc (num_bytes);
+  Node *result = (Node *) mem_malloc (nenofex->mm, num_bytes);
   assert (result);
   memset (result, 0, num_bytes);
 
@@ -970,7 +839,7 @@ collect_variable_as_unate (Nenofex * nenofex, Var * var)
   if (!var->collected_as_unate)
     {
       var->collected_as_unate = 1;
-      push_stack (nenofex->unates, var);
+      push_stack (nenofex->mm, nenofex->unates, var);
     }
 }
 
@@ -986,15 +855,15 @@ init_variable (Nenofex * nenofex, unsigned int abs_lit, Scope * scope)
   assert (abs_lit);
   assert (!(nenofex->vars[abs_lit]));
 
-  Var *var = (Var *) mem_malloc (sizeof (Var));
+  Var *var = (Var *) mem_malloc (nenofex->mm, sizeof (Var));
   assert (var);
   memset (var, 0, sizeof (Var));
 
   var->exp_costs.score = INT_MIN;
 
-  var->pos_in_lca_child_list_occs = create_stack (DEFAULT_STACK_SIZE);
+  var->pos_in_lca_child_list_occs = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
-  init_lca_object (&(var->exp_costs.lca_object));
+  init_lca_object (nenofex, &(var->exp_costs.lca_object));
 
   nenofex->vars[abs_lit] = var;
 
@@ -1014,11 +883,11 @@ init_variable (Nenofex * nenofex, unsigned int abs_lit, Scope * scope)
       scope = nenofex->scopes->elems[0];
       assert (scope->nesting == DEFAULT_SCOPE_NESTING);
     }
-  push_stack (scope->vars, var);
+  push_stack (nenofex->mm, scope->vars, var);
   scope->remaining_var_cnt++;
 
   /* NEW */
-  add_fast_priority_queue (scope->priority_heap, var);
+  add_fast_priority_queue (nenofex->mm, scope->priority_heap, var);
 
   var->scope = scope;
 
@@ -1191,8 +1060,8 @@ assert_child_occ_list_integrity (Nenofex * nenofex, Node * parent)
 static void
 assert_all_child_occ_lists_integrity (Nenofex * nenofex)
 {
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -1204,12 +1073,12 @@ assert_all_child_occ_lists_integrity (Nenofex * nenofex)
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
             {
-              push_stack (stack, child);
+              push_stack (nenofex->mm, stack, child);
             }
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -1217,11 +1086,11 @@ assert_all_child_occ_lists_integrity (Nenofex * nenofex)
 - for assertion checking only
 */
 static Node *
-find_node_by_id (Node * root, int id)
+find_node_by_id (Nenofex *nenofex, Node * root, int id)
 {
-  Stack *stack = create_stack (16);
+  Stack *stack = create_stack (nenofex->mm, 16);
   Node *cur = 0;
-  push_stack (stack, (void *) root);
+  push_stack (nenofex->mm, stack, (void *) root);
   while ((cur = (Node *) pop_stack (stack)))
     {
       if (cur->id == id)
@@ -1231,10 +1100,10 @@ find_node_by_id (Node * root, int id)
           Node *child;
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, (void *) child);
+            push_stack (nenofex->mm, stack, (void *) child);
         }
     }                           /* end: while */
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
   return cur;
 }
 
@@ -1243,11 +1112,11 @@ find_node_by_id (Node * root, int id)
 - for assertion checking only
 */
 static Node *
-find_node_by_address (Node * root, Node * node)
+find_node_by_address (Nenofex *nenofex, Node * root, Node * node)
 {
-  Stack *stack = create_stack (16);
+  Stack *stack = create_stack (nenofex->mm, 16);
   Node *cur = 0;
-  push_stack (stack, (void *) root);
+  push_stack (nenofex->mm, stack, (void *) root);
   while ((cur = (Node *) pop_stack (stack)))
     {
       if (cur == node)
@@ -1257,10 +1126,10 @@ find_node_by_address (Node * root, Node * node)
           Node *child;
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, (void *) child);
+            push_stack (nenofex->mm, stack, (void *) child);
         }
     }                           /* end: while */
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
   return cur;
 }
 
@@ -1297,7 +1166,7 @@ simplify_one_level (Nenofex * nenofex, Node * root)
 #endif
 
   Node *del_node = 0;
-  Stack *marked = create_stack (DEFAULT_STACK_SIZE);
+  Stack *marked = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   Node *ch, *next;
   for (ch = root->child_list.first; ch && (is_literal_node (ch)); ch = next)
@@ -1320,7 +1189,7 @@ simplify_one_level (Nenofex * nenofex, Node * root)
           else
             simplify_var_pos_mark (var);
 
-          push_stack (marked, var);
+          push_stack (nenofex->mm, marked, var);
         }
       else if (simplify_var_pos_marked (var))
         {
@@ -1393,7 +1262,7 @@ simplify_one_level (Nenofex * nenofex, Node * root)
 #endif
 #endif
 
-  delete_stack (marked);
+  delete_stack (nenofex->mm, marked);
 }
 
 
@@ -1402,10 +1271,10 @@ simplify_one_level (Nenofex * nenofex, Node * root)
 - mainly for debugging purposes
 */
 static void
-print_graph_by_traversal (Node * root)
+print_graph_by_traversal (Nenofex *nenofex, Node * root)
 {
-  Stack *stack = create_stack (1);
-  push_stack (stack, root);
+  Stack *stack = create_stack (nenofex->mm, 1);
+  push_stack (nenofex->mm, stack, root);
 
   Node *cur;
   while ((cur = (Node *) pop_stack (stack)))
@@ -1420,7 +1289,7 @@ print_graph_by_traversal (Node * root)
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
             {
-              push_stack (stack, (void *) child);
+              push_stack (nenofex->mm, stack, (void *) child);
               assert (*(stack->top - 1) == child);
             }
 
@@ -1442,7 +1311,7 @@ print_graph_by_traversal (Node * root)
         }
     }                           /* end: while */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -1586,13 +1455,13 @@ unlink_node (Nenofex * nenofex, Node * node)
 - after parent-merging: subtracts 'delta' from level of all nodes under 'root'
 */
 static void
-merge_parent_update_level (Node * root, unsigned const int delta)
+merge_parent_update_level (Nenofex *nenofex, Node * root, unsigned const int delta)
 {
   assert (!is_literal_node (root));
   assert (delta == 1 || delta == 2);
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -1604,11 +1473,11 @@ merge_parent_update_level (Node * root, unsigned const int delta)
           Node *child;
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
     }                           /* end: while */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -1645,7 +1514,7 @@ atpg_mark_nodes_for_testing_again (Nenofex * nenofex, Node * root)
 
   unsigned int inverted_cur_mark =
     !nenofex->atpg_rr->global_atpg_test_node_mark;
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   if (root == nenofex->changed_subformula.lca)
     {
@@ -1656,10 +1525,10 @@ atpg_mark_nodes_for_testing_again (Nenofex * nenofex, Node * root)
 
       Node **ch, *child;
       for (ch = nenofex->changed_subformula.children; (child = *ch); ch++)
-        push_stack (stack, child);
+        push_stack (nenofex->mm, stack, child);
     }
   else
-    push_stack (stack, root);
+    push_stack (nenofex->mm, stack, root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -1674,11 +1543,11 @@ atpg_mark_nodes_for_testing_again (Nenofex * nenofex, Node * root)
           Node *child;
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 #endif /* end if RESTRICT_ATPG_FAULT_NODE_SET */
@@ -1821,7 +1690,7 @@ delete_node (Nenofex * nenofex, Node * node)
       assert (!node->pos_in_lca_children);
     }
 
-  mem_free (node, sizeof (Node));
+  mem_free (nenofex->mm, node, sizeof (Node));
 }
 
 
@@ -1907,7 +1776,7 @@ merge_parent (Nenofex * nenofex, Node * parent)
       nenofex->graph_root->parent = 0;
 
       if (!is_literal_node (parent->child_list.first))
-        merge_parent_update_level (parent->child_list.first, 1);
+        merge_parent_update_level (nenofex, parent->child_list.first, 1);
       else
         nenofex->graph_root->level = 0;
 
@@ -2006,7 +1875,7 @@ merge_parent (Nenofex * nenofex, Node * parent)
           mark_fault_node_as_deleted (parent->atpg_info->fault_node);
 
           if (parent->parent->atpg_info && parent->parent->atpg_info->atpg_ch)
-            push_stack (parent->parent->atpg_info->atpg_ch,
+            push_stack (nenofex->mm, parent->parent->atpg_info->atpg_ch,
                         sub_parent->atpg_info->fault_node);
         }
     }
@@ -2067,7 +1936,7 @@ merge_parent (Nenofex * nenofex, Node * parent)
           next = child->level_link.next;
 
           if (!is_literal_node (child))
-            merge_parent_update_level (child, 2);
+            merge_parent_update_level (nenofex, child, 2);
 
           unlink_node (nenofex, child);
           add_node_to_child_list (nenofex, parent->parent, child);      /* levels are set */
@@ -2101,7 +1970,7 @@ merge_parent (Nenofex * nenofex, Node * parent)
 
           /* push children on watcher stack */
           if (parent->parent->atpg_info && parent->parent->atpg_info->atpg_ch)
-            push_stack (parent->parent->atpg_info->atpg_ch,
+            push_stack (nenofex->mm, parent->parent->atpg_info->atpg_ch,
                         child->atpg_info->fault_node);
 
           /* NOTE: simplify check by setting lca to parent->parent first in all cases ? */
@@ -2387,8 +2256,8 @@ remove_and_free_subformula (Nenofex * nenofex, Node * root)
 
 FREE_GRAPH:;
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -2427,7 +2296,7 @@ FREE_GRAPH:;
           Node *ch;
           for (ch = cur->child_list.last; ch; ch = ch->level_link.prev)
             {
-              push_stack (stack, ch);
+              push_stack (nenofex->mm, stack, ch);
             }
 
           if (cur->atpg_info)
@@ -2450,7 +2319,7 @@ FREE_GRAPH:;
           delete_node (nenofex, cur);
         }                       /* end: 'cur' is operator node */
     }                           /* end: while stack not empty */
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 
   if (!parent && !nenofex->distributivity_deleting_redundancies)
     {
@@ -2502,7 +2371,7 @@ assert_all_lca_children_unmarked (LCAObject * lca_object)
 
 
 static void
-init_lca_object (LCAObject * lca_object)
+init_lca_object (Nenofex *nenofex, LCAObject * lca_object)
 {
   assert (LCA_CHILDREN_INIT_SIZE > 0);
 
@@ -2511,7 +2380,7 @@ init_lca_object (LCAObject * lca_object)
   lca_object->size_children = LCA_CHILDREN_INIT_SIZE;
 
   size_t bytes = LCA_CHILDREN_INIT_SIZE * sizeof (Node *);
-  lca_object->children = (Node **) mem_malloc (bytes);
+  lca_object->children = (Node **) mem_malloc (nenofex->mm, bytes);
   assert (lca_object->children);
   memset (lca_object->children, 0, bytes);
 
@@ -2520,16 +2389,16 @@ init_lca_object (LCAObject * lca_object)
 
 
 static void
-free_lca_children (LCAObject * lca_object)
+free_lca_children (Nenofex *nenofex, LCAObject * lca_object)
 {
-  mem_free (lca_object->children,
+  mem_free (nenofex->mm, lca_object->children,
             lca_object->size_children * sizeof (Node *));
   lca_object->children = 0;
 }
 
 
 static void
-enlarge_lca_children (LCAObject * lca_object)
+enlarge_lca_children (Nenofex *nenofex, LCAObject * lca_object)
 {
   assert (lca_object->num_children == lca_object->size_children);
   assert (lca_object->top_p ==
@@ -2539,7 +2408,7 @@ enlarge_lca_children (LCAObject * lca_object)
   lca_object->size_children *= 2;
 
   lca_object->children =
-    (Node **) mem_realloc (lca_object->children, old_size * sizeof (Node *),
+    (Node **) mem_realloc (nenofex->mm, lca_object->children, old_size * sizeof (Node *),
                            lca_object->size_children * sizeof (Node *));
   assert (lca_object->children);
   memset (lca_object->children + old_size, 0,
@@ -2554,7 +2423,7 @@ enlarge_lca_children (LCAObject * lca_object)
 
 
 static void
-add_lca_child (LCAObject * lca_object, Node * child)
+add_lca_child (Nenofex *nenofex, LCAObject * lca_object, Node * child)
 {
   assert (lca_object->num_children < lca_object->size_children);
   assert (!*(lca_object->top_p));
@@ -2565,7 +2434,7 @@ add_lca_child (LCAObject * lca_object, Node * child)
   lca_object->top_p++;
 
   if (lca_object->num_children == lca_object->size_children)
-    enlarge_lca_children (lca_object);
+    enlarge_lca_children (nenofex, lca_object);
 
 }
 
@@ -2682,9 +2551,9 @@ remove_lca_child_list_occ (Nenofex * nenofex, Node * child,
 #if DELETE_EMPTY_STACKS_IN_NODES
   else if (child_lca_child_list_occs->top == child_lca_child_list_occs->elems)
     {                           /* both stacks are empty -> delete */
-      delete_stack (child_lca_child_list_occs);
+      delete_stack (nenofex->mm, child_lca_child_list_occs);
       child->lca_child_list_occs = 0;
-      delete_stack (child_pos_in_lca_children);
+      delete_stack (nenofex->mm, child_pos_in_lca_children);
       child->pos_in_lca_children = 0;
     }
 
@@ -2791,10 +2660,10 @@ find_lca_and_children (Nenofex * nenofex, Node * a, Node * b,
           && !is_literal_node (low_node_prev))
         {
           mark_lca_child (low_node_prev);
-          add_lca_child (lca_object, low_node_prev);
+          add_lca_child (nenofex, lca_object, low_node_prev);
         }
       else if (is_literal_node (low_node_prev))
-        add_lca_child (lca_object, low_node_prev);
+        add_lca_child (nenofex, lca_object, low_node_prev);
     }
   else
     {                           /* high != low -> move up successively in parallel */
@@ -2823,14 +2692,14 @@ find_lca_and_children (Nenofex * nenofex, Node * a, Node * b,
           assert (!lca_child_marked (low_node_prev));
           mark_lca_child (low_node_prev);
         }
-      add_lca_child (lca_object, low_node_prev);
+      add_lca_child (nenofex, lca_object, low_node_prev);
 
       if (!is_literal_node (high_node_prev))
         {
           assert (!lca_child_marked (high_node_prev));
           mark_lca_child (high_node_prev);
         }
-      add_lca_child (lca_object, high_node_prev);
+      add_lca_child (nenofex, lca_object, high_node_prev);
 
     }
 
@@ -2879,8 +2748,8 @@ assert_lca_object_integrity (Nenofex * nenofex,
         assert (lca_child_marked (*cur_p));
 
       assert (node_has_child (lca_object->lca, *cur_p));
-      assert (find_node_by_id (*cur_p, var->id)
-              || find_node_by_id (*cur_p, -var->id));
+      assert (find_node_by_id (nenofex, *cur_p, var->id)
+              || find_node_by_id (nenofex, *cur_p, -var->id));
     }
 
   Node *cur;
@@ -2891,7 +2760,7 @@ assert_lca_object_integrity (Nenofex * nenofex,
       found = 0;
       for (child = lca_object->children; *child && !found; child++)
         {
-          found = find_node_by_address (*child, cur);
+          found = find_node_by_address (nenofex, *child, cur);
         }
       assert (found);
     }
@@ -2901,7 +2770,7 @@ assert_lca_object_integrity (Nenofex * nenofex,
       found = 0;
       for (child = lca_object->children; *child && !found; child++)
         {
-          found = find_node_by_address (*child, cur);
+          found = find_node_by_address (nenofex, *child, cur);
         }
       assert (found);
     }
@@ -3053,21 +2922,21 @@ add_variable_to_lca_child_list_occs_of_nodes (Nenofex * nenofex,
         {                       /* TODO: adapt initial stack size? */
           assert (!child_pos_in_lca_children);
           child->lca_child_list_occs =
-            child_lca_child_list_occs = create_stack (DEFAULT_STACK_SIZE);
+            child_lca_child_list_occs = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
           child->pos_in_lca_children =
-            child_pos_in_lca_children = create_stack (DEFAULT_STACK_SIZE);
+            child_pos_in_lca_children = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
         }
       assert (child_pos_in_lca_children);
 
-      push_stack (var_pos_in_lca_child_list_occs,
+      push_stack (nenofex->mm, var_pos_in_lca_child_list_occs,
                   (void *) (unsigned long int)
                   count_stack (child_lca_child_list_occs));
 
       /* push 'var' on occ-stack, 'pos' of child in lca-children on pos-stack */
       assert (count_stack (child_lca_child_list_occs) ==
               count_stack (child_pos_in_lca_children));
-      push_stack (child_lca_child_list_occs, var);
-      push_stack (child_pos_in_lca_children, (void *) child_pos);
+      push_stack (nenofex->mm, child_lca_child_list_occs, var);
+      push_stack (nenofex->mm, child_pos_in_lca_children, (void *) child_pos);
 
       assert (count_stack (child->lca_child_list_occs) ==
               count_stack (child->pos_in_lca_children));
@@ -3177,13 +3046,13 @@ unmark_universal_lca_children (LCAObject * universal_lca_obj)
 
 
 static void
-collect_depending_variable (Stack * depending_existential_variables,
+collect_depending_variable (Nenofex *nenofex, Stack * depending_existential_variables,
                             Var * var)
 {
   if (!var->collected_as_depending)
     {
       var->collected_as_depending = 1;
-      push_stack (depending_existential_variables, var);
+      push_stack (nenofex->mm, depending_existential_variables, var);
     }
 }
 
@@ -3194,7 +3063,8 @@ collect_depending_variable (Stack * depending_existential_variables,
     calls of this function as typically happens during LCA-computation
 */
 static void
-collect_innermost_depending_existential_variables (Var * universal_var,
+collect_innermost_depending_existential_variables (Nenofex *nenofex, 
+                                                   Var * universal_var,
                                                    Stack *
                                                    depending_existential_variables,
                                                    Stack *
@@ -3206,13 +3076,13 @@ collect_innermost_depending_existential_variables (Var * universal_var,
           && !is_literal_node (universal_lca_object->lca));
 
   const unsigned int universal_nesting = universal_var->scope->nesting;
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   Node **ch, *child;
   for (ch = universal_lca_object->children; (child = *ch); ch++)
     {
       if (!dependency_visit_marked (child))
-        push_stack (stack, child);
+        push_stack (nenofex->mm, stack, child);
     }
 
   Node *cur;
@@ -3227,7 +3097,7 @@ collect_innermost_depending_existential_variables (Var * universal_var,
 
           if (is_existential_scope (scope)
               && scope->nesting > universal_nesting)
-            collect_depending_variable (depending_existential_variables, var);
+            collect_depending_variable (nenofex, depending_existential_variables, var);
         }
       else                      /* op-node */
         {
@@ -3235,12 +3105,12 @@ collect_innermost_depending_existential_variables (Var * universal_var,
                child = child->level_link.prev)
             {
               if (!dependency_visit_marked (child))
-                push_stack (stack, child);
+                push_stack (nenofex->mm, stack, child);
             }
         }                       /* end: op-node */
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 
   if (dependency_marked_nodes)
     {                           /* mark current LCA and LCA-children as visited */
@@ -3250,7 +3120,7 @@ collect_innermost_depending_existential_variables (Var * universal_var,
       if (!dependency_visit_marked (universal_lca))
         {
           mark_dependency_visit (universal_lca);
-          push_stack (dependency_marked_nodes, universal_lca);
+          push_stack (nenofex->mm, dependency_marked_nodes, universal_lca);
         }
 #endif
 
@@ -3259,7 +3129,7 @@ collect_innermost_depending_existential_variables (Var * universal_var,
           if (!dependency_visit_marked (child))
             {
               mark_dependency_visit (child);
-              push_stack (dependency_marked_nodes, child);
+              push_stack (nenofex->mm, dependency_marked_nodes, child);
             }
         }                       /* end: for all LCA-children */
     }                           /* end: mark nodes as visited */
@@ -3267,7 +3137,7 @@ collect_innermost_depending_existential_variables (Var * universal_var,
 
 
 static void
-unify_universal_lca_children (LCAObject * universal_lca_object,
+unify_universal_lca_children (Nenofex *nenofex, LCAObject * universal_lca_object,
                               LCAObject * existential_lca_object)
 {
   Node **ch, *child;
@@ -3276,7 +3146,7 @@ unify_universal_lca_children (LCAObject * universal_lca_object,
       if (!universal_lca_child_marked (child))
         {
           mark_universal_lca_child (child);
-          add_lca_child (universal_lca_object, child);
+          add_lca_child (nenofex, universal_lca_object, child);
         }
     }                           /* end: for */
 }
@@ -3308,7 +3178,7 @@ compute_universal_lca_by_unification (Nenofex * nenofex,
 
   if (universal_lca == existential_lca)
     {
-      unify_universal_lca_children (universal_lca_object,
+      unify_universal_lca_children (nenofex, universal_lca_object,
                                     existential_lca_object);
       return;
     }
@@ -3352,7 +3222,7 @@ compute_universal_lca_by_unification (Nenofex * nenofex,
           else
             {                   /* add child to universal_lca-children */
               mark_universal_lca_child (low_node_prev);
-              add_lca_child (universal_lca_object, low_node_prev);
+              add_lca_child (nenofex, universal_lca_object, low_node_prev);
             }
         }
       else                      /* high_node == existential_lca */
@@ -3369,13 +3239,13 @@ compute_universal_lca_by_unification (Nenofex * nenofex,
             {
               assert (!universal_lca_child_marked (child));
               mark_universal_lca_child (child);
-              add_lca_child (universal_lca_object, child);
+              add_lca_child (nenofex, universal_lca_object, child);
             }                   /* end: for */
 
           if (!universal_lca_child_marked (low_node_prev))
             {
               mark_universal_lca_child (low_node_prev);
-              add_lca_child (universal_lca_object, low_node_prev);
+              add_lca_child (nenofex, universal_lca_object, low_node_prev);
             }
 
           universal_lca_object->lca = existential_lca;
@@ -3413,11 +3283,11 @@ compute_universal_lca_by_unification (Nenofex * nenofex,
 
       assert (!universal_lca_child_marked (low_node_prev));
       mark_universal_lca_child (low_node_prev);
-      add_lca_child (universal_lca_object, low_node_prev);
+      add_lca_child (nenofex, universal_lca_object, low_node_prev);
 
       assert (!universal_lca_child_marked (high_node_prev));
       mark_universal_lca_child (high_node_prev);
-      add_lca_child (universal_lca_object, high_node_prev);
+      add_lca_child (nenofex, universal_lca_object, high_node_prev);
 
       add_variable_to_lca_list (nenofex, universal_var);
     }                           /* end: compute 'lca(universal_lca, existential_lca)' */
@@ -3453,8 +3323,8 @@ assert_no_var_collected_as_depending (Nenofex * nenofex)
 static void
 assert_universal_lca_computation_graph_and_vars (Nenofex * nenofex)
 {
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -3468,10 +3338,10 @@ assert_universal_lca_computation_graph_and_vars (Nenofex * nenofex)
           Node *child;
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
     }                           /* end: while stack not empty */
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 
   assert_no_var_collected_as_depending (nenofex);
 }
@@ -3504,16 +3374,16 @@ find_non_innermost_universal_lca_and_children (Nenofex * nenofex,
           universal_var->scope->nesting < (*nenofex->cur_scope)->nesting);
 
   LCAObject *universal_lca_object = &universal_var->exp_costs.lca_object;
-  Stack *depending_existential_variables = create_stack (DEFAULT_STACK_SIZE);
-  Stack *processed_existential_variables = create_stack (DEFAULT_STACK_SIZE);
-  Stack *dependency_marked_nodes = create_stack (DEFAULT_STACK_SIZE);
+  Stack *depending_existential_variables = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  Stack *processed_existential_variables = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  Stack *dependency_marked_nodes = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   /* first compute lca of univ. var. in standard way, 
      but do NOT add var. to lca-children yet */
   find_variable_lca_and_children (nenofex, universal_var,
                                   universal_lca_object, 0);
   mark_universal_lca_children (universal_lca_object);
-  collect_innermost_depending_existential_variables (universal_var,
+  collect_innermost_depending_existential_variables (nenofex, universal_var,
                                                      depending_existential_variables,
                                                      dependency_marked_nodes);
 
@@ -3527,7 +3397,7 @@ find_non_innermost_universal_lca_and_children (Nenofex * nenofex,
       while ((depending_var = pop_stack (depending_existential_variables)))
         {
           /* need to store processed vars for unmarking AFTERWARDS */
-          push_stack (processed_existential_variables, depending_var);
+          push_stack (nenofex->mm, processed_existential_variables, depending_var);
 
           assert (is_existential_scope (depending_var->scope));
           assert (depending_var->scope->nesting >
@@ -3562,7 +3432,7 @@ find_non_innermost_universal_lca_and_children (Nenofex * nenofex,
 
       /* now, 'universal_lca_object' holds current univ. LCA; 
          next, once again collect depending variables */
-      collect_innermost_depending_existential_variables (universal_var,
+      collect_innermost_depending_existential_variables (nenofex, universal_var,
                                                          depending_existential_variables,
                                                          dependency_marked_nodes);
     }                           /* end: outer while: while not all depending variables processed */
@@ -3587,9 +3457,9 @@ find_non_innermost_universal_lca_and_children (Nenofex * nenofex,
       unmark_dependency_visit (node);
     }
 
-  delete_stack (depending_existential_variables);
-  delete_stack (processed_existential_variables);
-  delete_stack (dependency_marked_nodes);
+  delete_stack (nenofex->mm, depending_existential_variables);
+  delete_stack (nenofex->mm, processed_existential_variables);
+  delete_stack (nenofex->mm, dependency_marked_nodes);
 
 #ifndef NDEBUG
 #if ASSERT_UNIVERSAL_LCA_COMPUTATION_GRAPH_AND_VARS
@@ -3679,10 +3549,10 @@ copy_node (Nenofex * nenofex, Node * node)
 void
 assert_copy_equals (Nenofex * nenofex, Node * original, Node * copy)
 {
-  Stack *stack1 = create_stack (16);
-  Stack *stack2 = create_stack (16);
-  push_stack (stack1, (void *) original);
-  push_stack (stack2, (void *) copy);
+  Stack *stack1 = create_stack (nenofex->mm, 16);
+  Stack *stack2 = create_stack (nenofex->mm, 16);
+  push_stack (nenofex->mm, stack1, (void *) original);
+  push_stack (nenofex->mm, stack2, (void *) copy);
 
   Node *cur1, *cur2;
   while ((cur1 = pop_stack (stack1)))
@@ -3707,13 +3577,13 @@ assert_copy_equals (Nenofex * nenofex, Node * original, Node * copy)
           for (child = cur1->child_list.last; child;
                child = child->level_link.prev)
             {
-              push_stack (stack1, (void *) child);
+              push_stack (nenofex->mm, stack1, (void *) child);
               cnt1++;
             }
           for (child = cur2->child_list.last; child;
                child = child->level_link.prev)
             {
-              push_stack (stack2, (void *) child);
+              push_stack (nenofex->mm, stack2, (void *) child);
               cnt2++;
             }
           assert (cnt1 == cnt2);
@@ -3722,8 +3592,8 @@ assert_copy_equals (Nenofex * nenofex, Node * original, Node * copy)
 
   assert (!count_stack (stack1));
   assert (!count_stack (stack2));
-  delete_stack (stack1);
-  delete_stack (stack2);
+  delete_stack (nenofex->mm, stack1);
+  delete_stack (nenofex->mm, stack2);
 }
 #endif
 
@@ -3744,11 +3614,11 @@ add_lit_node_to_occurrence_list (Nenofex * nenofex, Node * new_occ);
 static Node *
 copy_formula (Nenofex * nenofex, Node * root)
 {
-  Stack *node_stack = create_stack (DEFAULT_STACK_SIZE);        /* nodes to be visited */
-  Stack *copy_stack = create_stack (DEFAULT_STACK_SIZE);        /* copied nodes */
+  Stack *node_stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);        /* nodes to be visited */
+  Stack *copy_stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);        /* copied nodes */
   Node *result;
 
-  push_stack (node_stack, root);
+  push_stack (nenofex->mm, node_stack, root);
 
   Node *cur;
   while ((cur = pop_stack (node_stack)))
@@ -3757,20 +3627,20 @@ copy_formula (Nenofex * nenofex, Node * root)
         {
           assert (!cur->lit->var->copied);
           result = copy_node (nenofex, cur);
-          push_stack (copy_stack, result);
+          push_stack (nenofex->mm, copy_stack, result);
         }
       else
         {                       /* op-node -> copy children first */
           if (!copy_formula_marked (cur))
             {
               copy_formula_mark (cur);
-              push_stack (node_stack, cur);
+              push_stack (nenofex->mm, node_stack, cur);
 
               Node *child;
               for (child = cur->child_list.last; child;
                    child = child->level_link.prev)
                 {
-                  push_stack (node_stack, child);
+                  push_stack (nenofex->mm, node_stack, child);
                 }
             }
           else                  /* all children have been copied -> create OP-node */
@@ -3801,7 +3671,7 @@ copy_formula (Nenofex * nenofex, Node * root)
                     add_lit_node_to_occurrence_list (nenofex, child);
                 }
 
-              push_stack (copy_stack, result);
+              push_stack (nenofex->mm, copy_stack, result);
             }
         }                       /* end: is op-node */
     }                           /* end: while */
@@ -3820,8 +3690,8 @@ copy_formula (Nenofex * nenofex, Node * root)
   assert (!count_stack (copy_stack));
   assert (!count_stack (node_stack));
 
-  delete_stack (node_stack);
-  delete_stack (copy_stack);
+  delete_stack (nenofex->mm, node_stack);
+  delete_stack (nenofex->mm, copy_stack);
 
 #ifndef NDEBUG
 #if ASSERT_COPY_EQUALS
@@ -3842,11 +3712,11 @@ static Node *
 copy_formula_mark_propagation (Nenofex * nenofex, Node * root,
                                Var * expanded_var)
 {
-  Stack *node_stack = create_stack (DEFAULT_STACK_SIZE);        /* nodes to be visited */
-  Stack *copy_stack = create_stack (DEFAULT_STACK_SIZE);        /* copied nodes */
+  Stack *node_stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);        /* nodes to be visited */
+  Stack *copy_stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);        /* copied nodes */
   Node *result;
 
-  push_stack (node_stack, root);
+  push_stack (nenofex->mm, node_stack, root);
 
   Node *cur;
   while ((cur = pop_stack (node_stack)))
@@ -3869,20 +3739,20 @@ copy_formula_mark_propagation (Nenofex * nenofex, Node * root,
               collect_variable_for_update (nenofex, var);
             }
 
-          push_stack (copy_stack, result);
+          push_stack (nenofex->mm, copy_stack, result);
         }
       else
         {                       /* op-node -> copy children first */
           if (!copy_formula_marked (cur))
             {
               copy_formula_mark (cur);
-              push_stack (node_stack, cur);
+              push_stack (nenofex->mm, node_stack, cur);
 
               Node *child;
               for (child = cur->child_list.last; child;
                    child = child->level_link.prev)
                 {
-                  push_stack (node_stack, child);
+                  push_stack (nenofex->mm, node_stack, child);
                 }
             }
           else                  /* all children have been copied -> create OP-node */
@@ -3913,7 +3783,7 @@ copy_formula_mark_propagation (Nenofex * nenofex, Node * root,
                     add_lit_node_to_occurrence_list (nenofex, child);
                 }
 
-              push_stack (copy_stack, result);
+              push_stack (nenofex->mm, copy_stack, result);
             }
         }                       /* end: is op-node */
     }                           /* end: while */
@@ -3932,8 +3802,8 @@ copy_formula_mark_propagation (Nenofex * nenofex, Node * root,
   assert (!count_stack (copy_stack));
   assert (!count_stack (node_stack));
 
-  delete_stack (node_stack);
-  delete_stack (copy_stack);
+  delete_stack (nenofex->mm, node_stack);
+  delete_stack (nenofex->mm, copy_stack);
 
 #ifndef NDEBUG
 #if ASSERT_COPY_EQUALS
@@ -3954,8 +3824,8 @@ update_level (Nenofex * nenofex, Node * root)
   assert (root);
   assert (root->parent);
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -3966,11 +3836,11 @@ update_level (Nenofex * nenofex, Node * root)
           Node *child;
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
     }                           /* end: while */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -4036,8 +3906,8 @@ assert_expand_node_integrity (Nenofex * nenofex, Node * parent)
 static void
 assert_expand_graph_integrity (Nenofex * nenofex)
 {
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -4050,12 +3920,12 @@ assert_expand_graph_integrity (Nenofex * nenofex)
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
             {
-              push_stack (stack, child);
+              push_stack (nenofex->mm, stack, child);
             }
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 #endif /* end ifndef NDEBUG */
 
@@ -4181,10 +4051,10 @@ propagate_literals (Nenofex * nenofex, Var * var)
 unsigned int
 subformula_size (Nenofex * nenofex, Node * root)
 {
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
   unsigned int result = 0;
 
-  push_stack (stack, root);
+  push_stack (nenofex->mm, stack, root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -4195,11 +4065,11 @@ subformula_size (Nenofex * nenofex, Node * root)
           Node *ch;
           for (ch = cur->child_list.last; ch; ch = ch->level_link.prev)
             {
-              push_stack (stack, ch);
+              push_stack (nenofex->mm, stack, ch);
             }
         }
     }                           /* end: while */
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
   return result;
 }
 #endif /* end ifndef NDEBUG */
@@ -4367,8 +4237,8 @@ mark_occs_propagation_var_cost_update (Nenofex * nenofex, Var * var,
   assert (mark_var_truth == 0 || mark_var_truth == 1);
   assert (var->exp_costs.lca_object.lca);
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, var->exp_costs.lca_object.lca);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, var->exp_costs.lca_object.lca);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -4391,11 +4261,11 @@ mark_occs_propagation_var_cost_update (Nenofex * nenofex, Var * var,
         {
           Node *ch;
           for (ch = cur->child_list.last; ch; ch = ch->level_link.prev)
-            push_stack (stack, ch);
+            push_stack (nenofex->mm, stack, ch);
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -4468,7 +4338,7 @@ assign_changed_subformula (Nenofex * nenofex, LCAObject * lca_object)
     {
       for (ch = lca_object->children; (child = *ch); ch++)
         {                       /* add nodes */
-          add_lca_child (changed_subformula, child);
+          add_lca_child (nenofex, changed_subformula, child);
         }                       /* end: for */
 
       set_pos_in_changed_child_list (nenofex);
@@ -4480,7 +4350,7 @@ assign_changed_subformula (Nenofex * nenofex, LCAObject * lca_object)
       for (ch = lca_object->children; (child = *ch); ch++)
         {                       /* add nodes and set position */
           child->changed_ch_list_pos = pos++;
-          add_lca_child (changed_subformula, child);
+          add_lca_child (nenofex, changed_subformula, child);
         }                       /* end: for */
 
       assert (pos ==
@@ -4524,7 +4394,7 @@ unify_changed_lca_children (Nenofex * nenofex, LCAObject * lca_object)
       for (ch = lca_object->children; (child = *ch); ch++)
         {                       /* add children if not already contained */
           if (!child->changed_ch_list_pos)
-            add_lca_child (changed_subformula, child);
+            add_lca_child (nenofex, changed_subformula, child);
         }                       /* end: for */
 
       set_pos_in_changed_child_list (nenofex);
@@ -4538,7 +4408,7 @@ unify_changed_lca_children (Nenofex * nenofex, LCAObject * lca_object)
           if (!child->changed_ch_list_pos)
             {
               child->changed_ch_list_pos = pos++;
-              add_lca_child (changed_subformula, child);
+              add_lca_child (nenofex, changed_subformula, child);
             }
         }                       /* end: for */
     }
@@ -4661,7 +4531,7 @@ add_changed_lca_child (Nenofex * nenofex, Node * node)
   unsigned int old_size = changed_subformula->size_children;
 #endif
 
-  add_lca_child (changed_subformula, node);
+  add_lca_child (nenofex, changed_subformula, node);
 
   if (realloc_called)
     set_pos_in_changed_child_list (nenofex);
@@ -4801,10 +4671,10 @@ update_changed_subformula (Nenofex * nenofex, LCAObject * lca_object)
       changed_subformula->lca = high_node;
 
       low_node_prev->changed_ch_list_pos = changed_subformula->top_p;
-      add_lca_child (changed_subformula, low_node_prev);
+      add_lca_child (nenofex, changed_subformula, low_node_prev);
 
       high_node_prev->changed_ch_list_pos = changed_subformula->top_p;
-      add_lca_child (changed_subformula, high_node_prev);
+      add_lca_child (nenofex, changed_subformula, high_node_prev);
 
 #ifndef NDEBUG
       /* 'realloc' must not have been called */
@@ -5090,7 +4960,7 @@ flatten_by_ands_at_split_or (Nenofex * nenofex,
             {
               total_size_added += disjunction->size_subformula;
               add_node_to_child_list (nenofex, split_or_parent, disjunction);
-              add_lca_child (changed_subformula_new, disjunction);
+              add_lca_child (nenofex, changed_subformula_new, disjunction);
               update_level (nenofex, disjunction);
             }
         }                       /* end: for all children at second AND */
@@ -5135,7 +5005,7 @@ flatten_by_literals_at_split_or (Nenofex * nenofex, Node * scratch_node,
         {
           total_size_added += disjunction->size_subformula;
           add_node_to_child_list (nenofex, split_or_parent, disjunction);
-          add_lca_child (changed_subformula_new, disjunction);
+          add_lca_child (nenofex, changed_subformula_new, disjunction);
           update_level (nenofex, disjunction);
         }
     }                           /* end: for all children at AND */
@@ -5239,13 +5109,13 @@ post_expansion_flattening (Nenofex * nenofex,
     1 AND-child and arbitrarily many literal-children
 */
 int
-post_expansion_flattening_check_for_cnf_form (Node * split_or)
+post_expansion_flattening_check_for_cnf_form (Nenofex *nenofex, Node * split_or)
 {
   int result = 1;
   const unsigned int level_threshold = split_or->level + 3;
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, split_or);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, split_or);
 
   Node *cur;
   while ((cur = pop_stack (stack)) && result)
@@ -5256,7 +5126,7 @@ post_expansion_flattening_check_for_cnf_form (Node * split_or)
           for (child = cur->child_list.first; child;
                child = child->level_link.next)
             {
-              push_stack (stack, child);
+              push_stack (nenofex->mm, stack, child);
             }
         }
       else
@@ -5268,7 +5138,7 @@ post_expansion_flattening_check_for_cnf_form (Node * split_or)
         }
     }
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 
   return result;
 }
@@ -5316,7 +5186,7 @@ expand_existential_variable (Nenofex * nenofex, Var * var)
   Node *lca_object_lca = lca_object->lca;
 
   LCAObject changed_subformula_new;
-  init_lca_object (&changed_subformula_new);
+  init_lca_object (nenofex, &changed_subformula_new);
 
   assert (lca_object_lca);
   assert (lca_object->num_children != 0 || is_literal_node (lca_object_lca));
@@ -5399,8 +5269,8 @@ expand_existential_variable (Nenofex * nenofex, Var * var)
                   Node *copy =
                     copy_formula_mark_propagation (nenofex, child, var);
 
-                  add_lca_child (&changed_subformula_new, child);
-                  add_lca_child (&changed_subformula_new, copy);
+                  add_lca_child (nenofex, &changed_subformula_new, child);
+                  add_lca_child (nenofex, &changed_subformula_new, copy);
 
                   add_node_to_child_list (nenofex, lca_object_lca, copy);
                   update_size_delta += copy->size_subformula;
@@ -5452,8 +5322,8 @@ expand_existential_variable (Nenofex * nenofex, Var * var)
                 copy_formula_mark_propagation (nenofex, lca_object_lca, var);
               add_node_to_child_list (nenofex, split_or, copy);
 
-              add_lca_child (&changed_subformula_new, lca_object_lca);
-              add_lca_child (&changed_subformula_new, copy);
+              add_lca_child (nenofex, &changed_subformula_new, lca_object_lca);
+              add_lca_child (nenofex, &changed_subformula_new, copy);
 
               nenofex->graph_root->size_subformula =
                 1 + 2 * lca_object_lca->size_subformula;
@@ -5470,8 +5340,8 @@ expand_existential_variable (Nenofex * nenofex, Var * var)
               Node *copy =
                 copy_formula_mark_propagation (nenofex, lca_object_lca, var);
 
-              add_lca_child (&changed_subformula_new, lca_object_lca);
-              add_lca_child (&changed_subformula_new, copy);
+              add_lca_child (nenofex, &changed_subformula_new, lca_object_lca);
+              add_lca_child (nenofex, &changed_subformula_new, copy);
 
               add_node_to_child_list (nenofex, lca_object_lca->parent, copy);
 
@@ -5533,8 +5403,8 @@ expand_existential_variable (Nenofex * nenofex, Var * var)
                           || (child)->lit->var == var);
                   update_size_delta += copy->size_subformula;
 
-                  add_lca_child (&changed_subformula_new, child);
-                  add_lca_child (&changed_subformula_new, copy);
+                  add_lca_child (nenofex, &changed_subformula_new, child);
+                  add_lca_child (nenofex, &changed_subformula_new, copy);
                 }
 
               assert (num_children + lca_object->num_children ==
@@ -5643,15 +5513,15 @@ expand_existential_variable (Nenofex * nenofex, Var * var)
               Node *copy_and = copy_formula_mark_propagation (nenofex, new_and, var);   /* levels copied */
               add_node_to_child_list (nenofex, split_or, copy_and);
 
-              add_lca_child (&changed_subformula_new, new_and);
-              add_lca_child (&changed_subformula_new, copy_and);
+              add_lca_child (nenofex, &changed_subformula_new, new_and);
+              add_lca_child (nenofex, &changed_subformula_new, copy_and);
 
               split_or->size_subformula += 2 * copy_and->size_subformula;
               update_size_subformula (nenofex, split_or->parent,
                                       1 + copy_and->size_subformula + 1);
 
               if (!set_existential_split_or ||
-                  !post_expansion_flattening_check_for_cnf_form (nenofex->
+                  !post_expansion_flattening_check_for_cnf_form (nenofex, nenofex->
                                                                  existential_split_or))
                 {
                   nenofex->existential_split_or = 0;
@@ -5743,7 +5613,7 @@ expand_existential_variable (Nenofex * nenofex, Var * var)
   if (nenofex->existential_split_or)
     {
       assert (post_expansion_flattening_check_for_cnf_form
-              (nenofex->existential_split_or));
+              (nenofex, nenofex->existential_split_or));
       assert (nenofex->options.post_expansion_flattening_specified);
 
       post_expansion_flattening_reset_changed_new (&changed_subformula_new);
@@ -5769,7 +5639,7 @@ expand_existential_variable (Nenofex * nenofex, Var * var)
               for (child = remaining_child->child_list.first;
                    child; child = child->level_link.next)
                 {
-                  add_lca_child (&changed_subformula_new, child);
+                  add_lca_child (nenofex, &changed_subformula_new, child);
                 }
               assign_or_update_changed_subformula (&changed_subformula_new);
             }
@@ -5783,7 +5653,7 @@ expand_existential_variable (Nenofex * nenofex, Var * var)
     }
 
   nenofex->cur_expanded_var = 0;
-  free_lca_children (&changed_subformula_new);
+  free_lca_children (nenofex, &changed_subformula_new);
   assert (!nenofex->existential_split_or);
 }
 
@@ -5829,7 +5699,7 @@ expand_universal_variable (Nenofex * nenofex, Var * var)
   Node *lca_object_lca = lca_object->lca;
 
   LCAObject changed_subformula_new;
-  init_lca_object (&changed_subformula_new);
+  init_lca_object (nenofex, &changed_subformula_new);
 
   assert (lca_object_lca);
   assert (lca_object->num_children != 0 || is_literal_node (lca_object_lca));
@@ -5879,8 +5749,8 @@ expand_universal_variable (Nenofex * nenofex, Var * var)
                   assert (!is_literal_node ((child))
                           || (child)->lit->var == var);
 
-                  add_lca_child (&changed_subformula_new, child);
-                  add_lca_child (&changed_subformula_new, copy);
+                  add_lca_child (nenofex, &changed_subformula_new, child);
+                  add_lca_child (nenofex, &changed_subformula_new, copy);
                 }
               assert (2 * num_children == lca_object_lca->num_children);
               update_size_subformula (nenofex, lca_object_lca,
@@ -5924,8 +5794,8 @@ expand_universal_variable (Nenofex * nenofex, Var * var)
                 copy_formula_mark_propagation (nenofex, lca_object_lca, var);
               add_node_to_child_list (nenofex, split_and, copy);
 
-              add_lca_child (&changed_subformula_new, lca_object_lca);
-              add_lca_child (&changed_subformula_new, copy);
+              add_lca_child (nenofex, &changed_subformula_new, lca_object_lca);
+              add_lca_child (nenofex, &changed_subformula_new, copy);
 
               nenofex->graph_root->size_subformula =
                 1 + 2 * lca_object_lca->size_subformula;
@@ -5942,8 +5812,8 @@ expand_universal_variable (Nenofex * nenofex, Var * var)
               Node *copy =
                 copy_formula_mark_propagation (nenofex, lca_object_lca, var);
 
-              add_lca_child (&changed_subformula_new, lca_object_lca);
-              add_lca_child (&changed_subformula_new, copy);
+              add_lca_child (nenofex, &changed_subformula_new, lca_object_lca);
+              add_lca_child (nenofex, &changed_subformula_new, copy);
 
               add_node_to_child_list (nenofex, lca_object_lca->parent, copy);
 
@@ -6005,8 +5875,8 @@ expand_universal_variable (Nenofex * nenofex, Var * var)
                   assert (!is_literal_node ((child))
                           || (child)->lit->var == var);
 
-                  add_lca_child (&changed_subformula_new, child);
-                  add_lca_child (&changed_subformula_new, copy);
+                  add_lca_child (nenofex, &changed_subformula_new, child);
+                  add_lca_child (nenofex, &changed_subformula_new, copy);
                 }
               assert (num_children + lca_object->num_children ==
                       lca_object_lca->num_children);
@@ -6111,8 +5981,8 @@ expand_universal_variable (Nenofex * nenofex, Var * var)
                 copy_formula_mark_propagation (nenofex, new_or, var);
               add_node_to_child_list (nenofex, split_and, copy_or);
 
-              add_lca_child (&changed_subformula_new, new_or);
-              add_lca_child (&changed_subformula_new, copy_or);
+              add_lca_child (nenofex, &changed_subformula_new, new_or);
+              add_lca_child (nenofex, &changed_subformula_new, copy_or);
 
               split_and->size_subformula += 2 * copy_or->size_subformula;
               update_size_subformula (nenofex, split_and->parent,
@@ -6196,7 +6066,7 @@ expand_universal_variable (Nenofex * nenofex, Var * var)
 #endif
 
   nenofex->cur_expanded_var = 0;
-  free_lca_children (&changed_subformula_new);
+  free_lca_children (nenofex, &changed_subformula_new);
   assert (!nenofex->existential_split_or);
 
   if (count_stack (nenofex->depending_vars))
@@ -6475,7 +6345,7 @@ decrease_score_count_deleted (Nenofex * nenofex, Var * var)
   Node *var_lca = var->exp_costs.lca_object.lca;
   assert (var_lca);
 
-  Stack *collected_nodes = create_stack (DEFAULT_STACK_SIZE);
+  Stack *collected_nodes = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   Node *occ;
 
@@ -6538,7 +6408,7 @@ AGAIN:
           decrease_score_unmark (highest_marked);
           assert (!decrease_score_collected_marked (highest_marked));
           decrease_score_collected_mark (highest_marked);
-          push_stack (collected_nodes, highest_marked);
+          push_stack (nenofex->mm, collected_nodes, highest_marked);
         }
     }                           /* end: for all occurrences */
 
@@ -6557,7 +6427,7 @@ AGAIN:
       num_deleted += collected_node->size_subformula;
     }                           /* end: while */
 
-  delete_stack (collected_nodes);
+  delete_stack (nenofex->mm, collected_nodes);
 
   return num_deleted;
 }
@@ -6925,142 +6795,47 @@ add_node_to_child_list_before (Nenofex * nenofex, Node * child,
   assert (new_child->level == parent->level + 1);
 }
 
-
-/*
-- TODO: refinements
-*/
-static Node *
-add_orig_clause (Nenofex * nenofex, Stack * lit_stack)
+static void
+add_orig_clause_aux (Nenofex * nenofex, Node *clause)
 {
-  assert (nenofex->graph_root);
-  assert (nenofex->graph_root->size_subformula);
-
-  unsigned int lit_cnt = count_stack (lit_stack);
-
-  if (lit_cnt == 1)
-    {                           /* adding unit clause */
-      unsigned long int abs_lit = (((long int) (lit_stack->elems[0])) < 0 ?
-                                   -((long int) (lit_stack->
-                                                 elems[0])) : ((long
-                                                                int)
-                                                               (lit_stack->
-                                                                elems[0])));
-
-      if (!nenofex->vars[abs_lit])
-        {
-          if (count_stack (nenofex->scopes) != 1)
-            fprintf (stderr,
-                     "WARNING: first occ. of var in a clause in formula which is NOT propositional!\n");
-          init_variable (nenofex, abs_lit, 0);
-        }
-
-      Node *lit_n =
-        lit_node (nenofex, ((long int) lit_stack->elems[0]),
-                  nenofex->vars[abs_lit]);
-      lit_n->size_subformula = 1;
-      add_node_to_child_list (nenofex, nenofex->graph_root, lit_n);
-      nenofex->graph_root->size_subformula++;
-      add_lit_node_to_occurrence_list (nenofex, lit_n);
-
-      return lit_n;
-    }                           /* end: adding unit clause */
-
-  Node *clause = or_node (nenofex);
-  add_node_to_child_list (nenofex, nenofex->graph_root, clause);
-  clause->size_subformula = 1;
-
-  unsigned int i;
-  for (i = 0; i < lit_cnt; i++)
+  /* first two clauses are not simplified after parsing 
+     because this could delete whole graph */
+  if (nenofex->num_added_clauses == 1)
     {
-      long int lit = (long int) (lit_stack->elems[i]);
-      unsigned long int abs_lit = (lit < 0 ? -lit : lit);
-
-      if (!nenofex->vars[abs_lit])
-        {
-          if (count_stack (nenofex->scopes) != 1)
-            fprintf (stderr,
-                     "WARNING: first occ. of var in a clause in formula which is NOT propositional!\n");
-          init_variable (nenofex, abs_lit, 0);
-        }
-
-      Node *lit_n = lit_node (nenofex, lit, nenofex->vars[abs_lit]);
-      lit_n->size_subformula = 1;
-      add_node_to_child_list (nenofex, clause, lit_n);
-      add_lit_node_to_occurrence_list (nenofex, lit_n);
-    }                           /* end: for all literals */
-  clause->size_subformula += lit_cnt;
-
-  nenofex->graph_root->size_subformula += clause->size_subformula;
-
-  /* keep first two clauses -> simplify after all clauses have been parsed */
-  if (nenofex->graph_root->num_children >= 3)
-    {
-      simplify_one_level (nenofex, clause);
+      assert (nenofex->graph_root->num_children == 1);
+      assert (!nenofex->first_added_clause);
+      nenofex->first_added_clause = clause;
     }
-
-  return clause;
+  else if (nenofex->num_added_clauses == 2)
+    {
+      assert (nenofex->graph_root->num_children == 2);
+      assert (!nenofex->second_added_clause);
+      nenofex->second_added_clause = clause;
+    }
 }
 
 
 static void
-delete_scope (Scope * scope)
+delete_scope (Nenofex * nenofex, Scope * scope)
 {
-  delete_stack (scope->vars);
-  delete_priority_queue (&scope->priority_heap);
-  mem_free (scope, sizeof (Scope));
+  delete_stack (nenofex->mm, scope->vars);
+  delete_priority_queue (nenofex->mm, &scope->priority_heap);
+  mem_free (nenofex->mm, scope, sizeof (Scope));
 }
 
 
 static Scope *
-new_scope ()
+new_scope (Nenofex * nenofex)
 {
   size_t bytes = sizeof (Scope);
-  Scope *result = (Scope *) mem_malloc (bytes);
+  Scope *result = (Scope *) mem_malloc (nenofex->mm, bytes);
   assert (result);
   memset (result, 0, bytes);
 
-  result->vars = create_stack (DEFAULT_STACK_SIZE);
-  create_priority_queue (&result->priority_heap, DEFAULT_STACK_SIZE);
+  result->vars = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  create_priority_queue (nenofex->mm, &result->priority_heap, DEFAULT_STACK_SIZE);
 
   return result;
-}
-
-
-/*
-- TODO: refinements
-*/
-static void
-add_orig_scope (Nenofex * nenofex, Stack * lit_stack,
-                ScopeType parsed_scope_type)
-{
-  Scope *scope = new_scope ();
-  scope->type = parsed_scope_type;
-  scope->nesting = count_stack (nenofex->scopes);
-
-  /* TODO: handle empty scope */
-  assert (count_stack (lit_stack));
-
-  unsigned int i;
-  unsigned int cnt = count_stack (lit_stack);
-  for (i = 0; i < cnt; i++)
-    {                           /* TODO: pop instead */
-      long int lit = (long int) (lit_stack->elems[i]);
-      if (lit < 0)
-        {
-          fprintf (stderr, "Variable %ld quantified negatively!\n", lit);
-          exit (1);
-        }
-
-      if (nenofex->vars[lit])
-        {
-          fprintf (stderr, "Variable %ld already quantified!\n", lit);
-          exit (1);
-        }
-
-      init_variable (nenofex, lit, scope);
-    }
-
-  push_stack (nenofex->scopes, scope);
 }
 
 
@@ -7076,296 +6851,16 @@ set_cnf_root (Nenofex * nenofex)
 static void
 add_default_scope (Nenofex * nenofex)
 {
-  Scope *default_scope = new_scope ();
+  Scope *default_scope = new_scope (nenofex);
   default_scope->type = SCOPE_TYPE_EXISTENTIAL;
   default_scope->nesting = DEFAULT_SCOPE_NESTING;
 
-  push_stack (nenofex->scopes, default_scope);
+  push_stack (nenofex->mm, nenofex->scopes, default_scope);
 
   assert (nenofex->scopes->elems[0] == default_scope);
 }
 
-
-static void
-set_up_preamble (Nenofex * nenofex, unsigned int num_vars,
-                 unsigned int num_clauses)
-{
-  size_t bytes = (num_vars + 1) * sizeof (Var *);
-  nenofex->vars = (Var **) mem_malloc (bytes);
-  assert (nenofex->vars);
-  memset (nenofex->vars, 0, bytes);
-
-  nenofex->num_orig_vars = num_vars;
-  nenofex->next_free_node_id = num_vars + 1;
-  nenofex->tseitin_next_id = num_vars + 1;
-  nenofex->num_orig_clauses = num_clauses;
-  set_cnf_root (nenofex);
-}
-
-
 static int is_unsigned_string (char *str);
-
-
-/*
-- TODO: refinements
-- NOTE: root need not be simplified by one-level-simplification 
-*/
-static int
-parse (Nenofex * nenofex, FILE * input_file)
-{
-  unsigned int clause_cnt = 0;
-  int closed = 1;
-  int preamble_found = 0;
-
-  int done = 0;
-
-  add_default_scope (nenofex);
-
-  ScopeType parsed_scope_type = 0;
-
-  Node *first_clause = 0;
-  Node *second_clause = 0;
-  Stack *lit_stack = create_stack (DEFAULT_STACK_SIZE);
-
-  char c;
-  while ((c = fgetc (input_file)) != EOF)
-    {
-      assert (nenofex->result == NENOFEX_RESULT_UNKNOWN);
-
-      if (c == 'c')
-        {
-          while ((c = fgetc (input_file)) != EOF && c != '\n')
-            ;
-        }
-      else if (c == 'p')
-        {
-          if (preamble_found)
-            {
-              fprintf (stderr, "Preamble already occurred!\n\n");
-              exit (1);
-            }
-
-          if ((c = fgetc (input_file)) != ' ' ||
-              (c = fgetc (input_file)) != 'c' ||
-              (c = fgetc (input_file)) != 'n' ||
-              (c = fgetc (input_file)) != 'f' ||
-              (c = fgetc (input_file)) != ' ')
-            {
-              fprintf (stderr, "Malformed preamble!\n\n");
-              exit (1);
-            }
-
-          char num_vars_str[128] = { '\0' };
-          char num_clauses_str[128] = { '\0' };
-
-          fscanf (input_file, "%s", num_vars_str);
-          fscanf (input_file, "%s", num_clauses_str);
-
-          if (!is_unsigned_string (num_vars_str)
-              || !is_unsigned_string (num_clauses_str))
-            {
-              fprintf (stderr, "Malformed preamble!\n\n");
-              exit (1);
-            }
-
-          unsigned int num_vars, num_clauses;
-          num_vars = atoi (num_vars_str);
-          num_clauses = atoi (num_clauses_str);
-
-          set_up_preamble (nenofex, num_vars, num_clauses);
-
-          preamble_found = 1;
-        }
-      else if (c == '-' || isdigit (c))
-        {
-          if (!preamble_found)
-            {
-              fprintf (stderr, "Preamble missing!\n\n");
-              exit (1);
-            }
-
-
-          closed = 0;
-
-          ungetc (c, input_file);
-
-          long int val;
-          fscanf (input_file, "%ld", &val);
-
-          if (val == 0)
-            {
-              if (!parsed_scope_type)   /* parsing a clause */
-                {
-                  clause_cnt++;
-
-                  if (clause_cnt > nenofex->num_orig_clauses)
-                    {
-                      fprintf (stderr, "Too many clauses!\n\n");
-                      exit (1);
-                    }
-                  if (count_stack (lit_stack) == 0)
-                    {           /* empty clause */
-                      done = 1;
-                      nenofex->result = NENOFEX_RESULT_UNSAT;
-                      goto SKIP_SIMPLIFY;
-                    }
-
-                  Node *clause = add_orig_clause (nenofex, lit_stack);
-
-                  /* first two clauses are not simplified after parsing 
-                     because this could delete whole graph */
-                  if (clause_cnt == 1)
-                    {
-                      assert (nenofex->graph_root->num_children == 1);
-                      first_clause = clause;
-                    }
-                  else if (clause_cnt == 2)
-                    {
-                      assert (nenofex->graph_root->num_children == 2);
-                      second_clause = clause;
-                    }
-
-                  /*clause_closed = 1; */
-                }
-              else              /* parsing a scope */
-                {
-                  add_orig_scope (nenofex, lit_stack, parsed_scope_type);
-                  parsed_scope_type = 0;
-                }
-
-              closed = 1;
-              reset_stack (lit_stack);
-            }
-          else
-            {
-              unsigned int check_val = (val < 0 ? -val : val);
-
-              if (check_val > nenofex->num_orig_vars)
-                {
-                  fprintf (stderr, "Literal out of bounds!\n");
-                  exit (1);
-                }
-              push_stack (lit_stack, (void *) val);
-            }
-        }
-      else if (c == 'a')
-        {
-          parsed_scope_type = SCOPE_TYPE_UNIVERSAL;
-          if (!closed)
-            {
-              fprintf (stderr, "Scope not closed!\n");
-              exit (1);
-            }
-        }
-      else if (c == 'e')
-        {
-          parsed_scope_type = SCOPE_TYPE_EXISTENTIAL;
-          if (!closed)
-            {
-              fprintf (stderr, "Scope not closed!\n");
-              exit (1);
-            }
-        }
-      else if (!isspace (c))
-        {
-          fprintf (stderr, "Parsing: invalid character %c\n", c);
-          exit (1);
-        }
-
-    }                           /* end: while not end of file */
-
-  assert (nenofex->result == NENOFEX_RESULT_UNKNOWN);
-
-  if (!preamble_found)
-    {
-      fprintf (stderr, "Preamble missing!\n");
-      exit (1);
-    }
-
-  if (!closed)
-    {
-      fprintf (stderr, "Scope or clause not closed!\n");
-      exit (1);
-    }
-
-  if (clause_cnt != nenofex->num_orig_clauses)
-    {
-      fprintf (stderr, "Numbers of clauses do not match!\n");
-      exit (1);
-    }
-
-#if 0
-  if (count_stack (nenofex->var_stack) != nenofex->num_orig_vars)
-    {
-      fprintf (stderr,
-               "Warning: Number of variables does not match! specified %d, but actually %d\n",
-               nenofex->num_orig_vars, count_stack (nenofex->var_stack));
-    }
-#endif
-
-  if (clause_cnt == 0)
-    {                           /* no clause parsed */
-      done = 1;
-      nenofex->result = NENOFEX_RESULT_SAT;
-      goto SKIP_SIMPLIFY;
-    }
-
-  if (nenofex->graph_root->num_children == 1)
-    {                           /* only one clause parsed -> becomes new graph root */
-      assert (nenofex->graph_root->child_list.first);
-      assert (nenofex->graph_root->child_list.first ==
-              nenofex->graph_root->child_list.last);
-
-      Node *clause = nenofex->graph_root->child_list.first;
-      unlink_node (nenofex, clause);
-      delete_node (nenofex, nenofex->graph_root);
-      nenofex->graph_root = clause;
-
-      clause->level = 0;
-
-      if (!is_literal_node (clause))
-        {
-          Node *child;
-          for (child = clause->child_list.first; child;
-               child = child->level_link.next)
-            child->level = 1;
-        }
-
-      first_clause = second_clause = 0; /* need not simplify afterwards */
-    }                           /* end: root had only one clause */
-
-  /* simplify first two clauses */
-  assert (is_literal_node (nenofex->graph_root)
-          || nenofex->graph_root->num_children >= 2);
-
-  if (first_clause && !is_literal_node (first_clause))  /* if is not unit */
-    {
-      simplify_one_level (nenofex, first_clause);
-      if (nenofex->graph_root && is_or_node (nenofex->graph_root))      /* only 1 non-unit left */
-        simplify_one_level (nenofex, nenofex->graph_root);
-      else if (nenofex->graph_root && !is_literal_node (second_clause)) /* if not unit */
-        simplify_one_level (nenofex, second_clause);
-    }
-  else if (first_clause)        /* first is unit, check second */
-    {
-      if (second_clause && !is_literal_node (second_clause))    /* if not unit */
-        simplify_one_level (nenofex, second_clause);
-    }
-
-  /* NOTE: unit elimination is performed -> actually need no 1-l-simp */
-  if (nenofex->graph_root && !is_literal_node (nenofex->graph_root))
-    simplify_one_level (nenofex, nenofex->graph_root);
-
-SKIP_SIMPLIFY:
-
-  mem_free (nenofex->vars, (nenofex->num_orig_vars + 1) * sizeof (Var *));
-  nenofex->vars = (Var **) 0;
-
-  delete_stack (lit_stack);
-
-  return done;
-}
-
 
 static Var *
 find_min_cost_var_in_scope (Nenofex * nenofex, Scope * scope)
@@ -7423,8 +6918,8 @@ peek_min_cost_var_in_scope (Nenofex * nenofex, Scope * scope)
 static void
 assert_all_subformula_sizes (Nenofex * nenofex)
 {
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -7451,17 +6946,17 @@ assert_all_subformula_sizes (Nenofex * nenofex)
           else                  /* recalculate sizes of children first */
             {
               size_subformula_mark (cur);
-              push_stack (stack, cur);
+              push_stack (nenofex->mm, stack, cur);
 
               Node *child;
               for (child = cur->child_list.last; child;
                    child = child->level_link.prev)
-                push_stack (stack, child);
+                push_stack (nenofex->mm, stack, child);
             }
         }                       /* end: op-node */
     }                           /* end: while */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 #endif /* end ifndef NDEBUG */
@@ -7548,8 +7043,8 @@ is_formula_universal (Nenofex * nenofex)
 static void
 reset_all_node_ids (Nenofex * nenofex)
 {
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -7559,11 +7054,11 @@ reset_all_node_ids (Nenofex * nenofex)
         {
           Node *ch;
           for (ch = cur->child_list.last; ch; ch = ch->level_link.prev)
-            push_stack (stack, ch);
+            push_stack (nenofex->mm, stack, ch);
         }
     }
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -7600,8 +7095,8 @@ nnf_to_cnf_standard_tseitin_assign_node_ids (Nenofex * nenofex)
 
   /* traverse graph and assign IDs */
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -7620,11 +7115,11 @@ nnf_to_cnf_standard_tseitin_assign_node_ids (Nenofex * nenofex)
           Node *child;
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -7644,8 +7139,8 @@ nnf_to_cnf_standard_tseitin_count_clauses (Nenofex * nenofex, int qnnf)
   if (qnnf)
     clause_cnt = 0;
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -7657,11 +7152,11 @@ nnf_to_cnf_standard_tseitin_count_clauses (Nenofex * nenofex, int qnnf)
           Node *child;
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 
   return clause_cnt;
 }
@@ -7746,8 +7241,8 @@ nnf_to_cnf_standard_tseitin_dump (Nenofex * nenofex, FILE * out, int qnnf)
       fprintf (out, "%d 0\n", output);
     }
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -7775,7 +7270,7 @@ nnf_to_cnf_standard_tseitin_dump (Nenofex * nenofex, FILE * out, int qnnf)
           /* TODO: pushing children could be done in loop before */
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
       else if (is_or_node (cur))
         {
@@ -7801,11 +7296,11 @@ nnf_to_cnf_standard_tseitin_dump (Nenofex * nenofex, FILE * out, int qnnf)
           /* TODO: pushing children could be done in loop before */
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -7832,11 +7327,11 @@ nnf_to_cnf_standard_tseitin_forward (Nenofex * nenofex)
 
   int output = nenofex->sat_solver_tautology_mode ?
     -nenofex->graph_root->id : nenofex->graph_root->id;
-  sat_solver_add (output);
-  sat_solver_add (0);
+  sat_solver_add (nenofex, output);
+  sat_solver_add (nenofex, 0);
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -7850,57 +7345,57 @@ nnf_to_cnf_standard_tseitin_forward (Nenofex * nenofex)
                child = child->level_link.next)
             {
               assert (child->id);
-              sat_solver_add (-cur->id);
-              sat_solver_add (child->id);
-              sat_solver_add (0);
+              sat_solver_add (nenofex, -cur->id);
+              sat_solver_add (nenofex, child->id);
+              sat_solver_add (nenofex, 0);
             }
 
           for (child = cur->child_list.first; child;
                child = child->level_link.next)
             {
               assert (child->id);
-              sat_solver_add (-child->id);
+              sat_solver_add (nenofex, -child->id);
             }
-          sat_solver_add (cur->id);
-          sat_solver_add (0);
+          sat_solver_add (nenofex, cur->id);
+          sat_solver_add (nenofex, 0);
 
           /* TODO: pushing children could be done in loop before */
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
       else if (is_or_node (cur))
         {
           assert (cur->id > 0);
 
           Node *child;
-          sat_solver_add (-cur->id);
+          sat_solver_add (nenofex, -cur->id);
           for (child = cur->child_list.first; child;
                child = child->level_link.next)
             {
               assert (child->id);
-              sat_solver_add (child->id);
+              sat_solver_add (nenofex, child->id);
             }
-          sat_solver_add (0);
+          sat_solver_add (nenofex, 0);
 
           for (child = cur->child_list.first; child;
                child = child->level_link.next)
             {
               assert (child->id);
 
-              sat_solver_add (cur->id);
-              sat_solver_add (-child->id);
-              sat_solver_add (0);
+              sat_solver_add (nenofex, cur->id);
+              sat_solver_add (nenofex, -child->id);
+              sat_solver_add (nenofex, 0);
             }
 
           /* TODO: pushing children could be done in loop before */
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 /* ------- END: STANDARD TSEITIN TRANSFORMATION ------- */
@@ -7944,7 +7439,7 @@ nnf_to_cnf_tseitin_revised_assign_node_ids (Nenofex * nenofex)
       return;
     }
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   if (is_and_node (nenofex->graph_root))
     {
@@ -7956,7 +7451,7 @@ nnf_to_cnf_tseitin_revised_assign_node_ids (Nenofex * nenofex)
             {
               assert (!is_and_node (child));
               if (!is_literal_node (child))
-                push_stack (stack, child);
+                push_stack (nenofex->mm, stack, child);
               else
                 {
                   Lit *lit = child->lit;
@@ -7981,7 +7476,7 @@ nnf_to_cnf_tseitin_revised_assign_node_ids (Nenofex * nenofex)
                     {
                       if (!is_literal_node (child_child))
                         {
-                          push_stack (stack, child_child);
+                          push_stack (nenofex->mm, stack, child_child);
                         }
                       else
                         {
@@ -8014,7 +7509,7 @@ nnf_to_cnf_tseitin_revised_assign_node_ids (Nenofex * nenofex)
             {
               assert (!is_or_node (child));
               if (!is_literal_node (child))
-                push_stack (stack, child);
+                push_stack (nenofex->mm, stack, child);
               else
                 {
                   Lit *lit = child->lit;
@@ -8039,7 +7534,7 @@ nnf_to_cnf_tseitin_revised_assign_node_ids (Nenofex * nenofex)
                     {
                       if (!is_literal_node (child_child))
                         {
-                          push_stack (stack, child_child);
+                          push_stack (nenofex->mm, stack, child_child);
                         }
                       else
                         {
@@ -8086,7 +7581,7 @@ nnf_to_cnf_tseitin_revised_assign_node_ids (Nenofex * nenofex)
                 {
                   if (!is_literal_node (child_child))
                     {
-                      push_stack (stack, child_child);
+                      push_stack (nenofex->mm, stack, child_child);
                     }
                   else
                     {
@@ -8110,7 +7605,7 @@ nnf_to_cnf_tseitin_revised_assign_node_ids (Nenofex * nenofex)
 
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -8142,7 +7637,7 @@ nnf_to_cnf_tseitin_revised_count_clauses (Nenofex * nenofex)
 
   int clause_cnt = 0;
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   if (is_and_node (nenofex->graph_root))
     {
@@ -8155,11 +7650,11 @@ nnf_to_cnf_tseitin_revised_count_clauses (Nenofex * nenofex)
             {
               assert (!is_and_node (child));
               if (!is_literal_node (child))
-                push_stack (stack, child);
+                push_stack (nenofex->mm, stack, child);
             }
         }
       else
-        push_stack (stack, nenofex->graph_root);
+        push_stack (nenofex->mm, stack, nenofex->graph_root);
     }
   else                          /* OR */
     {
@@ -8172,11 +7667,11 @@ nnf_to_cnf_tseitin_revised_count_clauses (Nenofex * nenofex)
             {
               assert (!is_or_node (child));
               if (!is_literal_node (child))
-                push_stack (stack, child);
+                push_stack (nenofex->mm, stack, child);
             }
         }
       else
-        push_stack (stack, nenofex->graph_root);
+        push_stack (nenofex->mm, stack, nenofex->graph_root);
     }
 
   Node *cur;
@@ -8202,7 +7697,7 @@ nnf_to_cnf_tseitin_revised_count_clauses (Nenofex * nenofex)
                 {
                   if (!is_literal_node (child_child))
                     {
-                      push_stack (stack, child_child);
+                      push_stack (nenofex->mm, stack, child_child);
                     }
                 }               /* end: for child's children */
             }
@@ -8210,7 +7705,7 @@ nnf_to_cnf_tseitin_revised_count_clauses (Nenofex * nenofex)
 
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 
   return clause_cnt;
 }
@@ -8236,7 +7731,7 @@ nnf_to_cnf_tseitin_revised_top_truth_dump (Nenofex * nenofex, FILE * out)
       return;
     }
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   if (is_and_node (nenofex->graph_root))
     {
@@ -8258,7 +7753,7 @@ nnf_to_cnf_tseitin_revised_top_truth_dump (Nenofex * nenofex, FILE * out)
                   assert (child_child->id);
                   fprintf (out, "%d ", child_child->id);
                   if (!is_literal_node (child_child))
-                    push_stack (stack, child_child);
+                    push_stack (nenofex->mm, stack, child_child);
                 }               /* end: for all child's children */
               fprintf (out, "0\n");
             }
@@ -8274,7 +7769,7 @@ nnf_to_cnf_tseitin_revised_top_truth_dump (Nenofex * nenofex, FILE * out)
           fprintf (out, "%d ", child->id);      /* print top-or constraint */
           assert (!is_or_node (child));
           if (!is_literal_node (child))
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
       fprintf (out, "0\n");
     }
@@ -8304,7 +7799,7 @@ nnf_to_cnf_tseitin_revised_top_truth_dump (Nenofex * nenofex, FILE * out)
                   assert (child_child->id);
                   fprintf (out, "%d ", child_child->id);
                   if (!is_literal_node (child_child))
-                    push_stack (stack, child_child);
+                    push_stack (nenofex->mm, stack, child_child);
                 }               /* end: for all child's children */
               fprintf (out, "0\n");
             }
@@ -8312,7 +7807,7 @@ nnf_to_cnf_tseitin_revised_top_truth_dump (Nenofex * nenofex, FILE * out)
 
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -8329,12 +7824,12 @@ nnf_to_cnf_tseitin_revised_top_truth_forward (Nenofex * nenofex)
   if (is_literal_node (nenofex->graph_root))
     {
       assert (nenofex->graph_root->id);
-      sat_solver_add (nenofex->graph_root->id);
-      sat_solver_add (0);
+      sat_solver_add (nenofex, nenofex->graph_root->id);
+      sat_solver_add (nenofex, 0);
       return;
     }
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   if (is_and_node (nenofex->graph_root))
     {
@@ -8345,8 +7840,8 @@ nnf_to_cnf_tseitin_revised_top_truth_forward (Nenofex * nenofex)
           if (is_literal_node (child))
             {
               assert (child->id);
-              sat_solver_add (child->id);
-              sat_solver_add (0);
+              sat_solver_add (nenofex, child->id);
+              sat_solver_add (nenofex, 0);
             }
           else                  /* OR */
             {
@@ -8355,11 +7850,11 @@ nnf_to_cnf_tseitin_revised_top_truth_forward (Nenofex * nenofex)
                    child_child; child_child = child_child->level_link.prev)
                 {
                   assert (child_child->id);
-                  sat_solver_add (child_child->id);
+                  sat_solver_add (nenofex, child_child->id);
                   if (!is_literal_node (child_child))
-                    push_stack (stack, child_child);
+                    push_stack (nenofex->mm, stack, child_child);
                 }               /* end: for all child's children */
-              sat_solver_add (0);
+              sat_solver_add (nenofex, 0);
             }
         }                       /* end: for AND's children */
     }
@@ -8370,12 +7865,12 @@ nnf_to_cnf_tseitin_revised_top_truth_forward (Nenofex * nenofex)
            child; child = child->level_link.prev)
         {
           assert (child->id);
-          sat_solver_add (child->id);
+          sat_solver_add (nenofex, child->id);
           assert (!is_or_node (child));
           if (!is_literal_node (child))
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
-      sat_solver_add (0);
+      sat_solver_add (nenofex, 0);
     }
 
   Node *cur;
@@ -8388,12 +7883,12 @@ nnf_to_cnf_tseitin_revised_top_truth_forward (Nenofex * nenofex)
       for (child = cur->child_list.last; child;
            child = child->level_link.prev)
         {                       /* each 'child' generates a clause where child's children make up set of literals */
-          sat_solver_add (-cur->id);
+          sat_solver_add (nenofex, -cur->id);
           if (is_literal_node (child))
             {
               assert (child->id);
-              sat_solver_add (child->id);
-              sat_solver_add (0);
+              sat_solver_add (nenofex, child->id);
+              sat_solver_add (nenofex, 0);
             }
           else                  /* OR */
             {
@@ -8402,17 +7897,17 @@ nnf_to_cnf_tseitin_revised_top_truth_forward (Nenofex * nenofex)
                    child_child; child_child = child_child->level_link.prev)
                 {
                   assert (child_child->id);
-                  sat_solver_add (child_child->id);
+                  sat_solver_add (nenofex, child_child->id);
                   if (!is_literal_node (child_child))
-                    push_stack (stack, child_child);
+                    push_stack (nenofex->mm, stack, child_child);
                 }               /* end: for all child's children */
-              sat_solver_add (0);
+              sat_solver_add (nenofex, 0);
             }
         }                       /* end: for AND's children */
 
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -8436,7 +7931,7 @@ nnf_to_cnf_tseitin_revised_top_falsity_dump (Nenofex * nenofex, FILE * out)
       return;
     }
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   if (is_or_node (nenofex->graph_root))
     {
@@ -8458,7 +7953,7 @@ nnf_to_cnf_tseitin_revised_top_falsity_dump (Nenofex * nenofex, FILE * out)
                   assert (child_child->id);
                   fprintf (out, "%d ", -child_child->id);
                   if (!is_literal_node (child_child))
-                    push_stack (stack, child_child);
+                    push_stack (nenofex->mm, stack, child_child);
                 }               /* end: for all child's children */
               fprintf (out, "0\n");
             }
@@ -8474,7 +7969,7 @@ nnf_to_cnf_tseitin_revised_top_falsity_dump (Nenofex * nenofex, FILE * out)
           fprintf (out, "%d ", -child->id);     /* print top-and constraint */
           assert (!is_and_node (child));
           if (!is_literal_node (child))
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
       fprintf (out, "0\n");
     }
@@ -8504,7 +7999,7 @@ nnf_to_cnf_tseitin_revised_top_falsity_dump (Nenofex * nenofex, FILE * out)
                   assert (child_child->id);
                   fprintf (out, "%d ", -child_child->id);
                   if (!is_literal_node (child_child))
-                    push_stack (stack, child_child);
+                    push_stack (nenofex->mm, stack, child_child);
                 }               /* end: for all child's children */
               fprintf (out, "0\n");
             }
@@ -8512,7 +8007,7 @@ nnf_to_cnf_tseitin_revised_top_falsity_dump (Nenofex * nenofex, FILE * out)
 
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -8529,12 +8024,12 @@ nnf_to_cnf_tseitin_revised_top_falsity_forward (Nenofex * nenofex)
   if (is_literal_node (nenofex->graph_root))
     {
       assert (nenofex->graph_root->id);
-      sat_solver_add (-nenofex->graph_root->id);
-      sat_solver_add (0);
+      sat_solver_add (nenofex, -nenofex->graph_root->id);
+      sat_solver_add (nenofex, 0);
       return;
     }
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   if (is_or_node (nenofex->graph_root))
     {
@@ -8545,8 +8040,8 @@ nnf_to_cnf_tseitin_revised_top_falsity_forward (Nenofex * nenofex)
           if (is_literal_node (child))
             {
               assert (child->id);
-              sat_solver_add (-child->id);
-              sat_solver_add (0);
+              sat_solver_add (nenofex, -child->id);
+              sat_solver_add (nenofex, 0);
             }
           else                  /* AND */
             {
@@ -8555,11 +8050,11 @@ nnf_to_cnf_tseitin_revised_top_falsity_forward (Nenofex * nenofex)
                    child_child; child_child = child_child->level_link.prev)
                 {
                   assert (child_child->id);
-                  sat_solver_add (-child_child->id);
+                  sat_solver_add (nenofex, -child_child->id);
                   if (!is_literal_node (child_child))
-                    push_stack (stack, child_child);
+                    push_stack (nenofex->mm, stack, child_child);
                 }               /* end: for all child's children */
-              sat_solver_add (0);
+              sat_solver_add (nenofex, 0);
             }
         }                       /* end: for AND's children */
     }
@@ -8570,12 +8065,12 @@ nnf_to_cnf_tseitin_revised_top_falsity_forward (Nenofex * nenofex)
            child; child = child->level_link.prev)
         {
           assert (child->id);
-          sat_solver_add (-child->id);
+          sat_solver_add (nenofex, -child->id);
           assert (!is_and_node (child));
           if (!is_literal_node (child))
-            push_stack (stack, child);
+            push_stack (nenofex->mm, stack, child);
         }
-      sat_solver_add (0);
+      sat_solver_add (nenofex, 0);
     }
 
   Node *cur;
@@ -8588,12 +8083,12 @@ nnf_to_cnf_tseitin_revised_top_falsity_forward (Nenofex * nenofex)
       for (child = cur->child_list.last; child;
            child = child->level_link.prev)
         {                       /* each 'child' generates a clause where child's children make up set of literals */
-          sat_solver_add (cur->id);
+          sat_solver_add (nenofex, cur->id);
           if (is_literal_node (child))
             {
               assert (child->id);
-              sat_solver_add (-child->id);
-              sat_solver_add (0);
+              sat_solver_add (nenofex, -child->id);
+              sat_solver_add (nenofex, 0);
             }
           else                  /* AND */
             {
@@ -8602,17 +8097,17 @@ nnf_to_cnf_tseitin_revised_top_falsity_forward (Nenofex * nenofex)
                    child_child; child_child = child_child->level_link.prev)
                 {
                   assert (child_child->id);
-                  sat_solver_add (-child_child->id);
+                  sat_solver_add (nenofex, -child_child->id);
                   if (!is_literal_node (child_child))
-                    push_stack (stack, child_child);
+                    push_stack (nenofex->mm, stack, child_child);
                 }               /* end: for all child's children */
-              sat_solver_add (0);
+              sat_solver_add (nenofex, 0);
             }
         }                       /* end: for AND's children */
 
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 /* ------- END: REVISED TSEITIN TRANSFORMATION ------- */
@@ -8772,7 +8267,7 @@ get_var_assignments_from_sat_solver (Nenofex * nenofex)
               assert (!var->eliminated);
               assert (var->id > 0);
 
-              int sat_solver_deref = sat_solver_deref (var->id);
+              int sat_solver_deref = sat_solver_deref (nenofex, var->id);
               VarAssignment assignment;
               if (sat_solver_deref > 0)
                 assignment = VAR_ASSIGNMENT_TRUE;
@@ -8892,313 +8387,6 @@ assert_solver_options (Nenofex * nenofex)
 #endif
 
 
-/*
-- parse and set command line options
-*/
-static int
-parse_cmd_line_options (Nenofex * nenofex, int argc, char **argv)
-{
-  int done = 0;
-
-  int opt_cnt;
-  for (opt_cnt = 1; opt_cnt < argc; opt_cnt++)
-    {
-      char *opt_str = argv[opt_cnt];
-
-      if (!strcmp (opt_str, "-n"))
-        {
-          nenofex->options.num_expansions_specified = 1;
-
-          char *num_str = argv[++opt_cnt];
-          if (is_unsigned_string (num_str))
-            {
-              nenofex->options.num_expansions = atoi (num_str);
-              if (nenofex->options.num_expansions == 0)
-                {
-                  fprintf (stderr, "Expecting value > 0 after '-n'\n\n");
-                  exit (1);
-                }
-            }
-          else
-            {
-              fprintf (stderr,
-                       "Expecting non-zero positive integer after '-n'\n\n");
-              exit (1);
-            }
-        }
-      else
-        if (!strncmp (opt_str, "--size-cutoff=", strlen ("--size-cutoff=")))
-        {
-          opt_str += strlen ("--size-cutoff=");
-
-          if (strlen (opt_str) == 0)
-            {
-              fprintf (stderr, "Expecting value after '--size-cutoff='\n\n");
-              exit (1);
-            }
-
-          double size_cutoff = atof (opt_str);
-
-          double integer = 0;
-          double fractional = modf (size_cutoff, &integer);
-
-          if (fractional)
-            {                   /* relative size cutoff */
-              if ((size_cutoff <= -1.0F) || (size_cutoff >= 1.0F))
-                {
-                  fprintf (stderr,
-                           "Expecting '-1.0 < size_cutoff < 1.0' or an integer\n\n");
-                  exit (1);
-                }
-
-              nenofex->options.size_cutoff_relative_specified = 1;
-            }
-          else                  /* absolute size cutoff */
-            {
-              nenofex->options.size_cutoff_absolute_specified = 1;
-            }
-
-          nenofex->options.size_cutoff = size_cutoff;
-        }
-      else
-        if (!strncmp (opt_str, "--cost-cutoff=", strlen ("--cost-cutoff=")))
-        {
-          opt_str += strlen ("--cost-cutoff=");
-
-          if (strlen (opt_str) == 0)
-            {
-              fprintf (stderr, "Expecting value after '--cost-cutoff='\n\n");
-              exit (1);
-            }
-
-          nenofex->options.cost_cutoff_specified = 1;
-          nenofex->options.cost_cutoff = atoi (opt_str);
-        }
-      else
-        if (!strncmp
-            (opt_str, "--propagation-limit=",
-             strlen ("--propagation-limit=")))
-        {
-          opt_str += strlen ("--propagation-limit=");
-
-          if (strlen (opt_str) == 0)
-            {
-              fprintf (stderr,
-                       "Expecting value after '--propagation-limit='\n\n");
-              exit (1);
-            }
-
-          nenofex->options.propagation_limit_specified = 1;
-
-          if (is_unsigned_string (opt_str))
-            {
-              nenofex->options.propagation_limit = atoi (opt_str);
-            }
-          else
-            {
-              fprintf (stderr,
-                       "Expecting positive integer after '--propagation-limit='\n\n");
-              exit (1);
-            }
-        }
-      else
-        if (!strncmp (opt_str, "--univ-trigger=", strlen ("--univ-trigger=")))
-        {
-          opt_str += strlen ("--univ-trigger=");
-
-          if (strlen (opt_str) == 0)
-            {
-              fprintf (stderr,
-                       "Expecting value or 'abs' after '--univ-trigger='\n\n");
-              exit (1);
-            }
-
-          if (is_unsigned_string (opt_str))
-            {
-              nenofex->options.univ_trigger_abs = 0;
-              nenofex->options.univ_trigger = atoi (opt_str);
-            }
-          else
-            {
-              if (!strcmp (opt_str, "abs"))
-                nenofex->options.univ_trigger_abs = 1;
-              else
-                {
-                  fprintf (stderr,
-                           "Expecting positive integer or 'abs' after '--univ-trigger='\n\n");
-                  exit (1);
-                }
-            }
-        }
-      else if (!strncmp (opt_str, "--univ-delta=", strlen ("--univ-delta=")))
-        {
-          opt_str += strlen ("--univ-delta=");
-
-          if (strlen (opt_str) == 0)
-            {
-              fprintf (stderr, "Expecting value after '--univ-delta='\n\n");
-              exit (1);
-            }
-
-          if (is_unsigned_string (opt_str))
-            {
-              nenofex->options.univ_trigger_delta = atoi (opt_str);
-            }
-          else
-            {
-              fprintf (stderr,
-                       "Expecting positive integer after '--univ-delta='\n\n");
-              exit (1);
-            }
-        }
-      else
-        if (!strncmp
-            (opt_str, "--opt-subgraph-limit=",
-             strlen ("--opt-subgraph-limit=")))
-        {
-          opt_str += strlen ("--opt-subgraph-limit=");
-
-          if (strlen (opt_str) == 0)
-            {
-              fprintf (stderr,
-                       "Expecting value after '--opt-subgraph-limit='\n\n");
-              exit (1);
-            }
-
-          if (is_unsigned_string (opt_str))
-            {
-              nenofex->options.opt_subgraph_limit = atoi (opt_str);
-              if (nenofex->options.opt_subgraph_limit == 0)
-                {
-                  fprintf (stderr,
-                           "Expecting value > 0 after '--opt-subgraph-limit='\n\n");
-                  exit (1);
-                }
-            }
-          else
-            {
-              fprintf (stderr,
-                       "Expecting non-zero positive integer after '--opt-subgraph-limit='\n\n");
-              exit (1);
-            }
-
-          nenofex->options.opt_subgraph_limit_specified = 1;
-        }
-      else if (!strcmp (opt_str, "-h") || !strcmp (opt_str, "--help"))
-        {
-          done = 1;
-          fprintf (stdout, USAGE);
-        }
-
-      else if (!strcmp (opt_str, "--version"))
-        {
-          done = 1;
-          fprintf (stdout, VERSION);
-        }
-
-      else if (!strcmp (opt_str, "--verbose-sat-solving"))
-        {
-          nenofex->options.verbose_sat_solving_specified = 1;
-        }
-      else if (!strcmp (opt_str, "-v"))
-        {
-          nenofex->options.print_short_answer_specified = 0;
-        }
-      else if (!strcmp (opt_str, "--no-optimizations"))
-        {
-          nenofex->options.no_optimizations_specified = 1;
-        }
-      else if (!strcmp (opt_str, "--post-expansion-flattening"))
-        {
-          nenofex->options.post_expansion_flattening_specified = 1;
-        }
-      else if (!strcmp (opt_str, "--no-atpg"))
-        {
-          nenofex->options.no_atpg_specified = 1;
-        }
-      else if (!strcmp (opt_str, "--no-global-flow"))
-        {
-          nenofex->options.no_global_flow_specified = 1;
-        }
-      else if (!strcmp (opt_str, "--full-expansion"))
-        {
-          nenofex->options.full_expansion_specified = 1;
-        }
-      else if (!strcmp (opt_str, "--dump-cnf"))
-        {
-          nenofex->options.dump_cnf_specified = 1;
-        }
-      else if (!strcmp (opt_str, "--no-sat-solving"))
-        {
-          nenofex->options.no_sat_solving_specified = 1;
-        }
-      else if (!strcmp (opt_str, "--show-progress"))
-        {
-          nenofex->options.show_progress_specified = 1;
-        }
-      else if (!strcmp (opt_str, "--show-opt-info"))
-        {
-          nenofex->options.show_opt_info_specified = 1;
-        }
-      else if (!strcmp (opt_str, "--show-graph-size"))
-        {
-          nenofex->options.show_graph_size_specified = 1;
-        }
-#if 0                           /* does not yet work */
-      else if (!strcmp (opt_str, "--print-assignment"))
-        {
-          nenofex->options.print_assignment_specified = 1;
-        }
-#endif
-      else
-        if (!strncmp
-            (opt_str, "--cnf-generator=", strlen ("--cnf-generator=")))
-        {
-          opt_str += strlen ("--cnf-generator=");
-          if (!strcmp (opt_str, "tseitin"))
-            {
-              nenofex->options.cnf_generator_tseitin_specified = 1;
-              nenofex->options.cnf_generator_tseitin_revised_specified = 0;
-            }
-          else if (!strcmp (opt_str, "tseitin_revised"))
-            {
-              nenofex->options.cnf_generator_tseitin_revised_specified = 1;
-              nenofex->options.cnf_generator_tseitin_specified = 0;
-            }
-          else
-            {
-              fprintf (stderr, "Unknown option %s\n", argv[opt_cnt]);
-              exit (1);
-            }
-        }
-      else if (is_unsigned_string (opt_str))
-        {
-          nenofex->options.max_time = atoi (opt_str);
-          if (nenofex->options.max_time == 0)
-            {
-              fprintf (stderr, "Expecting value > 0 for max-time limit\n\n");
-              exit (1);
-            }
-        }
-      else if (!strncmp (opt_str, "-", 1) || !strncmp (opt_str, "--", 2))
-        {
-          fprintf (stderr, "Unknown option %s\n", opt_str);
-          exit (1);
-        }
-      else if (!nenofex->options.input_filename)
-        {
-          nenofex->options.input_filename = opt_str;
-        }
-      else
-        {
-          fprintf (stderr, "Unknown option %s\n", opt_str);
-          exit (1);
-        }
-
-    }                           /* end: for all arguments */
-
-  return done;
-}
 
 
 /*
@@ -9212,7 +8400,7 @@ simplify_mark_lca_variables_for_update (Nenofex * nenofex, Var * var,
 
   Node **ch, *child;
   for (ch = var->exp_costs.lca_object.children; (child = *ch); ch++)
-    push_stack (node_stack, child);
+    push_stack (nenofex->mm, node_stack, child);
 
   Node *node;
   while ((node = pop_stack (node_stack)))
@@ -9230,7 +8418,7 @@ simplify_mark_lca_variables_for_update (Nenofex * nenofex, Var * var,
         {
           for (child = node->child_list.first; child;
                child = child->level_link.next)
-            push_stack (node_stack, child);
+            push_stack (nenofex->mm, node_stack, child);
         }
     }                           /* end: while stack not empty */
 }
@@ -9337,7 +8525,7 @@ simplify_eliminate_unates (Nenofex * nenofex)
           assert (var->lits[1].occ_list.first || !var->lits[1].occ_list.last);
 
           if (!node_stack)
-            node_stack = create_stack (DEFAULT_STACK_SIZE);
+            node_stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
           found++;
 
@@ -9365,7 +8553,7 @@ simplify_eliminate_unates (Nenofex * nenofex)
 
   if (node_stack)
     {
-      delete_stack (node_stack);
+      delete_stack (nenofex->mm, node_stack);
       node_stack = 0;
     }
 
@@ -9414,7 +8602,7 @@ simplify_eliminate_units (Nenofex * nenofex)
   assert (literal);
 
   if (is_literal_node (literal))
-    node_stack = create_stack (DEFAULT_STACK_SIZE);
+    node_stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   while (literal && is_literal_node (literal))
     {
@@ -9505,7 +8693,7 @@ simplify_eliminate_units (Nenofex * nenofex)
 
   if (node_stack)
     {
-      delete_stack (node_stack);
+      delete_stack (nenofex->mm, node_stack);
     }
 
   return found;
@@ -9740,8 +8928,8 @@ compute_graph_statistics (Nenofex * nenofex)
   unsigned int total_node_level = 0;
   float average_level_per_node = 0;
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, nenofex->graph_root);
+  Stack *stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+  push_stack (nenofex->mm, stack, nenofex->graph_root);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -9778,7 +8966,7 @@ compute_graph_statistics (Nenofex * nenofex)
                       cur_lit_cnt++;
                       total_lit_cnt_per_or_node++;
                     }
-                  push_stack (stack, ch);
+                  push_stack (nenofex->mm, stack, ch);
                 }               /* end: for all children */
 
               if (cur_lit_cnt > max_lit_cnt_per_or_node)
@@ -9806,7 +8994,7 @@ compute_graph_statistics (Nenofex * nenofex)
                       cur_lit_cnt++;
                       total_lit_cnt_per_and_node++;
                     }
-                  push_stack (stack, ch);
+                  push_stack (nenofex->mm, stack, ch);
                 }               /* end: for all children */
 
               if (cur_lit_cnt > max_lit_cnt_per_and_node)
@@ -9905,7 +9093,7 @@ compute_graph_statistics (Nenofex * nenofex)
   fprintf (out, "\taverage level per node: %f\n", average_level_per_node);
   fprintf (out, "--\n");
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -10091,15 +9279,15 @@ peek_min_cost_universal_var_in_next_scope (Nenofex * nenofex,
 static void
 copy_and_add_depending_variable (Nenofex * nenofex, Var * depending_var)
 {
-  Var *var_copy = (Var *) mem_malloc (sizeof (Var));
+  Var *var_copy = (Var *) mem_malloc (nenofex->mm, sizeof (Var));
   assert (var_copy);
   memset (var_copy, 0, sizeof (Var));
 
-  var_copy->pos_in_lca_child_list_occs = create_stack (DEFAULT_STACK_SIZE);
+  var_copy->pos_in_lca_child_list_occs = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
 
   var_copy->exp_costs.score = INT_MIN;
 
-  init_lca_object (&(var_copy->exp_costs.lca_object));
+  init_lca_object (nenofex, &(var_copy->exp_costs.lca_object));
 
   var_copy->id = depending_var->id;     /* var-IDs do not matter at all */
   var_copy->priority_pos = -1;
@@ -10113,10 +9301,10 @@ copy_and_add_depending_variable (Nenofex * nenofex, Var * depending_var)
   var_copy->lits[1].occ_list.last = (Node *) 0;
 
   Scope *scope = depending_var->scope;
-  push_stack (scope->vars, var_copy);
+  push_stack (nenofex->mm, scope->vars, var_copy);
   scope->remaining_var_cnt++;
 
-  add_fast_priority_queue (scope->priority_heap, var_copy);
+  add_fast_priority_queue (nenofex->mm, scope->priority_heap, var_copy);
 
   var_copy->scope = scope;
 
@@ -10179,7 +9367,7 @@ prepare_non_innermost_universal_expansion (Nenofex * nenofex,
 #endif
 
   /* TODO: not necessary if depending vars are stored after LCA computation */
-  collect_innermost_depending_existential_variables (universal_var,
+  collect_innermost_depending_existential_variables (nenofex, universal_var,
                                                      nenofex->depending_vars,
                                                      0);
 
@@ -10324,11 +9512,11 @@ AGAIN:
         }
 
       var->priority_pos = -1;
-      push_stack (next_scope_vars, var);
+      push_stack (nenofex->mm, next_scope_vars, var);
       var->scope = next_scope;
 
       if (variable_has_occs (var))
-        add_fast_priority_queue (next_scope->priority_heap, var);
+        add_fast_priority_queue (nenofex->mm, next_scope->priority_heap, var);
     }                           /* end: for all variables in 'cur_scope' */
 
   reset_stack (cur_scope->priority_heap);
@@ -10565,7 +9753,7 @@ print_lit_stats_before_exp (Nenofex * nenofex, Var * var)
   /* Estimate how many nodes could be shared. This is done by detecting 
      which subtrees' functions are not affected by expansion. */
   LCAObject *lcaobj = &var->exp_costs.lca_object;
-  Stack *stack = create_stack (1);
+  Stack *stack = create_stack (nenofex->mm, 1);
   Node **childpp, *childp, *tmp;
 
 #ifndef NDEBUG
@@ -10575,14 +9763,14 @@ print_lit_stats_before_exp (Nenofex * nenofex, Var * var)
   do
     {
       for (childpp = lcaobj->children; (childp = *childpp); childpp++)
-        push_stack (stack, childp);
+        push_stack (nenofex->mm, stack, childp);
 
       while ((childp = pop_stack (stack)))
         {
           assert (!childp->mark1);
           for (childp = childp->child_list.first; childp;
                childp = childp->level_link.next)
-            push_stack (stack, childp);
+            push_stack (nenofex->mm, stack, childp);
         }
     }
   while (0);
@@ -10623,7 +9811,7 @@ print_lit_stats_before_exp (Nenofex * nenofex, Var * var)
   /* Traverse LCA-subtree and count subtree sizes. */
   assert (count_stack (stack) == 0);
   for (childpp = lcaobj->children; (childp = *childpp); childpp++)
-    push_stack (stack, childp);
+    push_stack (nenofex->mm, stack, childp);
 
   while ((childp = pop_stack (stack)))
     {
@@ -10637,7 +9825,7 @@ print_lit_stats_before_exp (Nenofex * nenofex, Var * var)
           childp->mark1 = 0;
           for (childp = childp->child_list.first; childp;
                childp = childp->level_link.next)
-            push_stack (stack, childp);
+            push_stack (nenofex->mm, stack, childp);
         }
     }
 
@@ -10662,7 +9850,7 @@ print_lit_stats_before_exp (Nenofex * nenofex, Var * var)
 #endif
 #endif
 
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 
   fprintf (stderr, "\nBEFORE INNERMOST EXP: LIT STATS\n");
 
@@ -10696,6 +9884,10 @@ expansion_phase (Nenofex * nenofex)
   assert (!nenofex->consider_univ_exp);
   assert (((Scope *) * nenofex->scopes->elems)->nesting ==
           DEFAULT_SCOPE_NESTING);
+
+  /* Store graph size at start of expansion phase. */
+  nenofex->init_graph_size = nenofex->graph_root ? 
+    nenofex->graph_root->size_subformula : 0;
 
 #if 1                           /* WORKAROUND: remove vars without any occs after parsing 
                                    (violation of QDIMACS standard) */
@@ -11055,6 +10247,21 @@ expansion_phase (Nenofex * nenofex)
             }
         }                       /* end: size_cutoff specified */
 
+      /* Check for absolute cutoff limit */
+      if (nenofex->options.abs_graph_size_cutoff > 0)
+        {
+          if (nenofex->graph_root && 
+              nenofex->graph_root->size_subformula > 
+              nenofex->options.abs_graph_size_cutoff * nenofex->init_graph_size)
+            {
+              fprintf (stderr,
+                       "\n\tGRAPH SIZE CUTOFF: cutoff = %f, init size = %d, cur size = %d\n\n",
+                       nenofex->options.abs_graph_size_cutoff,
+                       nenofex->init_graph_size, nenofex->graph_root->size_subformula);
+              break;
+            }
+        }
+
 #ifndef NDEBUG
 #if ASSERT_AFTER_EXP_ALL_NON_INNERMOST_SCOPE_VARS_UNINIT
       assert_all_non_innermost_scope_vars_uninitialized (nenofex,
@@ -11082,9 +10289,9 @@ sat_solving_phase (Nenofex * nenofex)
 
       if (forward)
         {
-          sat_solver_init ();
+          sat_solver_init (nenofex);
           if (nenofex->options.verbose_sat_solving_specified)
-            sat_solver_verbosity_mode ();
+            sat_solver_verbosity_mode (nenofex);
           nnf_to_cnf_forward (nenofex);
         }
 
@@ -11093,8 +10300,13 @@ sat_solving_phase (Nenofex * nenofex)
 
       if (forward)
         {
-          int sat_res = sat_solver_sat ();
-          assert (sat_res);
+          int sat_res = sat_solver_sat (nenofex);
+
+          if (sat_res == SAT_SOLVER_RESULT_UNKNOWN)
+            fprintf (stderr,
+                     "\n\tSAT solver result unknown due to decision limit %u\n\n",
+                     nenofex->options.sat_solver_dec_limit);
+          nenofex->stats.sat_solver_decisions = picosat_decisions (nenofex->picosat);
 
           nenofex->result = sat_res;
 
@@ -11105,7 +10317,7 @@ sat_solving_phase (Nenofex * nenofex)
               generate_qdimacs_output (nenofex, stdout);
             }
 
-          sat_solver_reset ();
+          sat_solver_reset (nenofex);
         }
     }                           /* end: propositional formula */
 
@@ -11117,9 +10329,9 @@ sat_solving_phase (Nenofex * nenofex)
 
       if (forward)
         {
-          sat_solver_init ();
+          sat_solver_init (nenofex);
           if (nenofex->options.verbose_sat_solving_specified)
-            sat_solver_verbosity_mode ();
+            sat_solver_verbosity_mode (nenofex);
           nnf_to_cnf_forward (nenofex);
         }
 
@@ -11128,11 +10340,20 @@ sat_solving_phase (Nenofex * nenofex)
 
       if (forward)
         {
-          int sat_res = sat_solver_sat ();
-          assert (sat_res);
+          int sat_res = sat_solver_sat (nenofex);
 
-          nenofex->result = sat_res == SAT_SOLVER_RESULT_SATISFIABLE ?
-            NENOFEX_RESULT_UNSAT : NENOFEX_RESULT_SAT;
+          if (sat_res == SAT_SOLVER_RESULT_UNKNOWN)
+            fprintf (stderr,
+                     "\n\tSAT solver result unknown due to decision limit %u\n\n",
+                     nenofex->options.sat_solver_dec_limit);
+          nenofex->stats.sat_solver_decisions = picosat_decisions (nenofex->picosat);
+
+          /* Handle unknown SAT solver result, may happen due to decision limit. */
+          if (sat_res != SAT_SOLVER_RESULT_UNKNOWN)
+            {
+              nenofex->result = sat_res == SAT_SOLVER_RESULT_SATISFIABLE ?
+                NENOFEX_RESULT_UNSAT : NENOFEX_RESULT_SAT;
+            }
 
           if (nenofex->options.print_assignment_specified &&
               nenofex->result == NENOFEX_RESULT_UNSAT)
@@ -11141,7 +10362,7 @@ sat_solving_phase (Nenofex * nenofex)
               generate_qdimacs_output (nenofex, stdout);
             }
 
-          sat_solver_reset ();
+          sat_solver_reset (nenofex);
         }
     }                           /* end: universal formula */
 }
@@ -11313,17 +10534,192 @@ print_statistics_after_expansion (Nenofex * nenofex)
 #endif
 }
 
-
-static int
-solve (Nenofex * nenofex)
+static void
+post_formula_addition_simplified (Nenofex *nenofex)
 {
+  /* Must prevent multiple calls in parse function and then in solve function. */
+  if (nenofex->post_formula_addition_simplified)
+    return;
+  nenofex->post_formula_addition_simplified = 1;
+
+  if (nenofex->graph_root->num_children == 1)
+    {                           /* only one clause parsed -> becomes new graph root */
+      assert (nenofex->graph_root->child_list.first);
+      assert (nenofex->graph_root->child_list.first ==
+              nenofex->graph_root->child_list.last);
+
+      Node *clause = nenofex->graph_root->child_list.first;
+      unlink_node (nenofex, clause);
+      delete_node (nenofex, nenofex->graph_root);
+      nenofex->graph_root = clause;
+
+      clause->level = 0;
+
+      if (!is_literal_node (clause))
+        {
+          Node *child;
+          for (child = clause->child_list.first; child;
+               child = child->level_link.next)
+            child->level = 1;
+        }
+
+      nenofex->first_added_clause = nenofex->second_added_clause = 0; /* need not simplify afterwards */
+    }                           /* end: root had only one clause */
+
+  /* simplify first two clauses */
+  assert (is_literal_node (nenofex->graph_root)
+          || nenofex->graph_root->num_children >= 2);
+
+  if (nenofex->first_added_clause && !is_literal_node (nenofex->first_added_clause))  /* if is not unit */
+    {
+      simplify_one_level (nenofex, nenofex->first_added_clause);
+      if (nenofex->graph_root && is_or_node (nenofex->graph_root))      /* only 1 non-unit left */
+        simplify_one_level (nenofex, nenofex->graph_root);
+      else if (nenofex->graph_root && !is_literal_node (nenofex->second_added_clause)) /* if not unit */
+        simplify_one_level (nenofex, nenofex->second_added_clause);
+    }
+  else if (nenofex->first_added_clause)        /* first is unit, check second */
+    {
+      if (nenofex->second_added_clause && !is_literal_node (nenofex->second_added_clause))    /* if not unit */
+        simplify_one_level (nenofex, nenofex->second_added_clause);
+    }
+
+  /* NOTE: unit elimination is performed -> actually need no 1-l-simp */
+  if (nenofex->graph_root && !is_literal_node (nenofex->graph_root))
+    simplify_one_level (nenofex, nenofex->graph_root);
+}
+
+static void
+post_formula_addition_cleanup (Nenofex *nenofex)
+{
+  if (nenofex->vars)
+    {
+      mem_free (nenofex->mm, nenofex->vars, (nenofex->num_orig_vars + 1) * sizeof (Var *));
+      nenofex->vars = (Var **) 0;
+    }
+}
+
+/* --------- START: API FUNCTIONS --------- */
+
+Nenofex *
+nenofex_create ()
+{
+  MemManager *mm = memmanager_create ();
+  size_t num_bytes = sizeof (Nenofex);
+  Nenofex *result = mem_malloc (mm, num_bytes);
+  assert (result);
+  memset (result, 0, num_bytes);
+
+  result->mm = mm;
+
+  result->start_time = time_stamp ();
+
+  result->scopes = create_stack (mm, DEFAULT_STACK_SIZE);
+  result->unates = create_stack (mm, DEFAULT_STACK_SIZE);
+  result->depending_vars = create_stack (mm, DEFAULT_STACK_SIZE);
+  result->vars_marked_for_update = create_stack (mm, DEFAULT_STACK_SIZE);
+  result->atpg_rr = create_atpg_redundancy_remover (mm);
+
+  init_lca_object (result, &(result->changed_subformula));
+
+  /* default settings */
+  set_default_cmd_line_options (result);
+
+  add_default_scope (result);
+
+#ifndef NDEBUG
+  assert_solver_options (result);
+#endif
+
+  return result;
+}
+
+void
+nenofex_delete (Nenofex *nenofex)
+{
+  assert (!nenofex->vars);
+  MemManager *mm = nenofex->mm;
+  free_graph (nenofex);
+
+  free_lca_children (nenofex, &(nenofex->changed_subformula));
+
+  Scope *scope;
+  while ((scope = pop_stack (nenofex->scopes)))
+    {
+      Var *var;
+      while ((var = pop_stack (scope->vars)))
+        {
+          delete_stack (mm, var->pos_in_lca_child_list_occs);
+          free_lca_children (nenofex, &(var->exp_costs.lca_object));
+          assert (!var->subformula_pos_occs);
+          assert (!var->subformula_neg_occs);
+          mem_free (mm, var, sizeof (Var));
+        }
+      delete_scope (nenofex, scope);
+    }
+  delete_stack (mm, nenofex->scopes);
+
+  delete_stack (mm, nenofex->unates);
+  delete_stack (mm, nenofex->vars_marked_for_update);
+  delete_stack (mm, nenofex->depending_vars);
+
+  free_atpg_redundancy_remover (nenofex->atpg_rr);
+  mem_free (mm, nenofex, sizeof (Nenofex));
+  memmanager_delete (mm);
+}
+
+
+NenofexResult 
+nenofex_solve (Nenofex *nenofex)
+{
+  if (nenofex->solve_called)
+    {
+      fprintf (stderr, "Must not call 'nenofex_solve' more than once!\n");
+      exit (1);
+    }
+  nenofex->solve_called = 1;
+
+  if (!nenofex->empty_clause_added &&
+      nenofex->num_added_clauses != nenofex->num_orig_clauses)
+    {
+      fprintf (stderr, "Numbers of declared and added clauses do not match!\n");
+      exit (1);
+    }
+
+  /* Must cleanup regardless of whether added formula is trivial or not. */
+  post_formula_addition_cleanup (nenofex);
+
+  /* Handle trivially unsatisfiable formula in library use. */
+  if (nenofex->empty_clause_added)
+    {
+      assert (nenofex->num_added_clauses > 0);
+      if (nenofex->result == NENOFEX_RESULT_UNKNOWN)
+        nenofex->result = NENOFEX_RESULT_UNSAT;
+      else
+        assert (nenofex->result == NENOFEX_RESULT_UNSAT);
+      goto TRIVIAL_FORMULA;
+    }
+
+  /* Handle trivially satisfiable formula in library use. */
+  if (nenofex->num_added_clauses == 0)
+    {
+      if (nenofex->result == NENOFEX_RESULT_UNKNOWN)
+        nenofex->result = NENOFEX_RESULT_SAT;
+      else
+        assert (nenofex->result == NENOFEX_RESULT_SAT);
+      goto TRIVIAL_FORMULA;
+    }
+
+  /* Simplify added formula to set up invariants. */
+  post_formula_addition_simplified (nenofex);
+
   if (!nenofex->options.print_short_answer_specified)
     print_statistics_at_start (nenofex);
 
   if (nenofex->result != NENOFEX_RESULT_UNKNOWN)
     {
       assert (!nenofex->graph_root);
-      return nenofex->result;
+      goto TRIVIAL_FORMULA;
     }
 
   expansion_phase (nenofex);
@@ -11348,105 +10744,12 @@ solve (Nenofex * nenofex)
       quantified_nnf_to_cnf_dump (nenofex, stdout);
     }
 
-  return nenofex->result;
-}
-
-
-int
-nenofex_main (int argc, char **argv)
-{
-  int done = 0;
-  int result = NENOFEX_RESULT_UNKNOWN;
-
-  Nenofex *nenofex = create_nenofex ();
-
-  nenofex->start_time = time_stamp ();
-
-  /* default settings */
-  set_default_cmd_line_options (nenofex);
-
-  done = parse_cmd_line_options (nenofex, argc, argv);
-
-  if (nenofex->options.max_time)
-    {
-      alarm (nenofex->options.max_time);
-      if (!nenofex->options.print_short_answer_specified)
-        fprintf (stderr, "Time limit set to %u seconds\n",
-                 nenofex->options.max_time);
-    }
-
-  if (done)
-    goto FREE_GRAPH;
-
-#ifndef NDEBUG
-  assert_solver_options (nenofex);
-#endif
-
-  DIR *dir = 0;
-  FILE *input_file = 0;
-
-  if (!nenofex->options.input_filename)
-    input_file = stdin;
-  else
-    {
-      if ((dir = opendir (nenofex->options.input_filename)) != NULL)
-        {
-          fprintf (stderr, "'%s' is a directory!\n\n",
-                   nenofex->options.input_filename);
-          closedir (dir);
-          exit (1);
-        }
-      input_file = fopen (nenofex->options.input_filename, "r");
-    }
-
-  if (!done && input_file)
-    done = parse (nenofex, input_file);
-  else if (!done)
-    {
-      fprintf (stderr, "Could not open file '%s'!\n\n",
-               nenofex->options.input_filename);
-      exit (1);
-    }
-
-  if (nenofex->options.input_filename)
-    fclose (input_file);
-
-#ifndef NDEBUG
-#if ASSERT_GRAPH_AFTER_PARSING
-  assert_all_child_occ_lists_integrity (nenofex);
-  assert_all_occ_lists_integrity (nenofex);
-  assert_all_subformula_sizes (nenofex);
-  assert_all_one_level_simplified (nenofex);
-#endif
-#endif
-
-  if (!done)
-    {
-      solve (nenofex);
-    }
-
-  result = nenofex->result;
+ TRIVIAL_FORMULA:
 
   if (!nenofex->options.print_short_answer_specified)
     {
-      fprintf (stderr, "\n\tresult:\t%s after %d expansions\n",
-               nenofex->result == NENOFEX_RESULT_SAT ?
-               "TRUE" : (nenofex->result ==
-                         NENOFEX_RESULT_UNSAT ? "FALSE" : "UNKNOWN"),
+      fprintf (stderr, "\nfinished after %d expansions\n",
                nenofex->cur_expansions);
-    }
-  else
-    {
-      int answer;
-      if (nenofex->result == NENOFEX_RESULT_SAT)
-        answer = 1;
-      else if (nenofex->result == NENOFEX_RESULT_UNSAT)
-        answer = 0;
-      else
-        answer = -1;
-
-      fprintf (stdout, "s cnf %d %d %d\n", answer,
-               nenofex->num_orig_vars, nenofex->num_orig_clauses);
     }
 
   nenofex->end_time = time_stamp ();
@@ -11459,13 +10762,704 @@ nenofex_main (int argc, char **argv)
     expansion_time = 0;
 
   if (!nenofex->options.print_short_answer_specified)
-    fprintf (stderr, "\ttime:\t%.2fs with %.2fs in expansions\n",
+    {
+    fprintf (stderr, "time:\t%.2fs with %.2fs in expansions\n",
              total_time, expansion_time);
+    fprintf (stderr, "SAT solver decisions: %llu\n", nenofex->stats.sat_solver_decisions);
+    }
 
-FREE_GRAPH:
-  free_nenofex (nenofex);
+  return nenofex->result;
+}
 
-  mem_check ();
+/*
+- parse and configure by configure-string
+*/
+void
+nenofex_configure (Nenofex * nenofex, char *opt_str)
+{
+  if (nenofex->solve_called)
+    {
+      fprintf (stderr, "Must not call 'nenofex_configure' after solving!\n");
+      exit (1);
+    }
+
+  if (!strncmp (opt_str, "-n=", strlen ("-n=")))
+    {
+      nenofex->options.num_expansions_specified = 1;
+      opt_str += strlen ("-n=");
+
+      if (is_unsigned_string (opt_str))
+	{
+	  nenofex->options.num_expansions = atoi (opt_str);
+	  if (nenofex->options.num_expansions == 0)
+	    {
+	      fprintf (stderr, "Expecting value > 0 after '-n='\n\n");
+	      exit (1);
+	    }
+	}
+      else
+	{
+	  fprintf (stderr,
+		   "Expecting non-zero positive integer after '-n='\n\n");
+	  exit (1);
+	}
+    }
+  else if (!strncmp (opt_str, "--abs-graph-size-cutoff=", strlen ("--abs-graph-size-cutoff=")))
+    {
+      opt_str += strlen ("--abs-graph-size-cutoff=");
+      if (strlen (opt_str) == 0)
+	{
+	  fprintf (stderr, "Expecting value after '--abs-graph-size-cutoff='\n\n");
+	  exit (1);
+	}
+      nenofex->options.abs_graph_size_cutoff = strtof (opt_str, 0);
+      if (nenofex->options.abs_graph_size_cutoff < 0)
+        {
+	  fprintf (stderr,
+		   "Expecting positive value after '--abs-graph-size-cutoff='\n\n");
+	  exit (1);
+        }
+    }
+  else if (!strncmp (opt_str, "--size-cutoff=", strlen ("--size-cutoff=")))
+    {
+      opt_str += strlen ("--size-cutoff=");
+
+      if (strlen (opt_str) == 0)
+	{
+	  fprintf (stderr, "Expecting value after '--size-cutoff='\n\n");
+	  exit (1);
+	}
+
+      double size_cutoff = atof (opt_str);
+
+      double integer = 0;
+      double fractional = modf (size_cutoff, &integer);
+
+      if (fractional)
+	{                   /* relative size cutoff */
+	  if ((size_cutoff <= -1.0F) || (size_cutoff >= 1.0F))
+	    {
+	      fprintf (stderr,
+		       "Expecting '-1.0 < size_cutoff < 1.0' or an integer\n\n");
+	      exit (1);
+	    }
+
+	  nenofex->options.size_cutoff_relative_specified = 1;
+	}
+      else                  /* absolute size cutoff */
+	{
+	  nenofex->options.size_cutoff_absolute_specified = 1;
+	}
+
+      nenofex->options.size_cutoff = size_cutoff;
+    }
+  else if (!strncmp (opt_str, "--cost-cutoff=", strlen ("--cost-cutoff=")))
+    {
+      opt_str += strlen ("--cost-cutoff=");
+
+      if (strlen (opt_str) == 0)
+	{
+	  fprintf (stderr, "Expecting value after '--cost-cutoff='\n\n");
+	  exit (1);
+	}
+
+      nenofex->options.cost_cutoff_specified = 1;
+      nenofex->options.cost_cutoff = atoi (opt_str);
+    }
+  else if (!strncmp
+	   (opt_str, "--propagation-limit=",
+	    strlen ("--propagation-limit=")))
+    {
+      opt_str += strlen ("--propagation-limit=");
+
+      if (strlen (opt_str) == 0)
+	{
+	  fprintf (stderr,
+		   "Expecting value after '--propagation-limit='\n\n");
+	  exit (1);
+	}
+
+      nenofex->options.propagation_limit_specified = 1;
+
+      if (is_unsigned_string (opt_str))
+	{
+	  nenofex->options.propagation_limit = atoi (opt_str);
+	}
+      else
+	{
+	  fprintf (stderr,
+		   "Expecting positive integer after '--propagation-limit='\n\n");
+	  exit (1);
+	}
+    }
+  else if (!strncmp (opt_str, "--univ-trigger=", strlen ("--univ-trigger=")))
+    {
+      opt_str += strlen ("--univ-trigger=");
+
+      if (strlen (opt_str) == 0)
+	{
+	  fprintf (stderr,
+		   "Expecting value or 'abs' after '--univ-trigger='\n\n");
+	  exit (1);
+	}
+
+      if (is_unsigned_string (opt_str))
+	{
+	  nenofex->options.univ_trigger_abs = 0;
+	  nenofex->options.univ_trigger = atoi (opt_str);
+	}
+      else
+	{
+	  if (!strcmp (opt_str, "abs"))
+	    nenofex->options.univ_trigger_abs = 1;
+	  else
+	    {
+	      fprintf (stderr,
+		       "Expecting positive integer or 'abs' after '--univ-trigger='\n\n");
+	      exit (1);
+	    }
+	}
+    }
+  else if (!strncmp (opt_str, "--univ-delta=", strlen ("--univ-delta=")))
+    {
+      opt_str += strlen ("--univ-delta=");
+
+      if (strlen (opt_str) == 0)
+	{
+	  fprintf (stderr, "Expecting value after '--univ-delta='\n\n");
+	  exit (1);
+	}
+
+      if (is_unsigned_string (opt_str))
+	{
+	  nenofex->options.univ_trigger_delta = atoi (opt_str);
+	}
+      else
+	{
+	  fprintf (stderr,
+		   "Expecting positive integer after '--univ-delta='\n\n");
+	  exit (1);
+	}
+    }
+  else if (!strncmp
+	   (opt_str, "--opt-subgraph-limit=",
+	    strlen ("--opt-subgraph-limit=")))
+    {
+      opt_str += strlen ("--opt-subgraph-limit=");
+
+      if (strlen (opt_str) == 0)
+	{
+	  fprintf (stderr,
+		   "Expecting value after '--opt-subgraph-limit='\n\n");
+	  exit (1);
+	}
+
+      if (is_unsigned_string (opt_str))
+	{
+	  nenofex->options.opt_subgraph_limit = atoi (opt_str);
+	  if (nenofex->options.opt_subgraph_limit == 0)
+	    {
+	      fprintf (stderr,
+		       "Expecting value > 0 after '--opt-subgraph-limit='\n\n");
+	      exit (1);
+	    }
+	}
+      else
+	{
+	  fprintf (stderr,
+		   "Expecting non-zero positive integer after '--opt-subgraph-limit='\n\n");
+	  exit (1);
+	}
+
+      nenofex->options.opt_subgraph_limit_specified = 1;
+    }
+  else if (!strncmp
+	   (opt_str, "--sat-solver-dec-limit=",
+	    strlen ("--sat-solver-dec-limit=")))
+    {
+      opt_str += strlen ("--sat-solver-dec-limit=");
+      if (strlen (opt_str) == 0)
+	{
+	  fprintf (stderr,
+		   "Expecting value after '--sat-solver-dec-limit='\n\n");
+	  exit (1);
+	}
+      if (is_unsigned_string (opt_str))
+        nenofex->options.sat_solver_dec_limit = atoi (opt_str);
+      else
+	{
+	  fprintf (stderr,
+		   "Expecting positive integer after '--sat-solver-dec-limit='\n\n");
+	  exit (1);
+	}
+    }
+  else if (!strcmp (opt_str, "--verbose-sat-solving"))
+    {
+      nenofex->options.verbose_sat_solving_specified = 1;
+    }
+  else if (!strcmp (opt_str, "-v"))
+    {
+      nenofex->options.print_short_answer_specified = 0;
+    }
+  else if (!strcmp (opt_str, "--no-optimizations"))
+    {
+      nenofex->options.no_optimizations_specified = 1;
+    }
+  else if (!strcmp (opt_str, "--post-expansion-flattening"))
+    {
+      nenofex->options.post_expansion_flattening_specified = 1;
+    }
+  else if (!strcmp (opt_str, "--no-atpg"))
+    {
+      nenofex->options.no_atpg_specified = 1;
+    }
+  else if (!strcmp (opt_str, "--no-global-flow"))
+    {
+      nenofex->options.no_global_flow_specified = 1;
+    }
+  else if (!strcmp (opt_str, "--full-expansion"))
+    {
+      nenofex->options.full_expansion_specified = 1;
+    }
+  else if (!strcmp (opt_str, "--dump-cnf"))
+    {
+      nenofex->options.dump_cnf_specified = 1;
+    }
+  else if (!strcmp (opt_str, "--no-sat-solving"))
+    {
+      nenofex->options.no_sat_solving_specified = 1;
+    }
+  else if (!strcmp (opt_str, "--show-progress"))
+    {
+      nenofex->options.show_progress_specified = 1;
+    }
+  else if (!strcmp (opt_str, "--show-opt-info"))
+    {
+      nenofex->options.show_opt_info_specified = 1;
+    }
+  else if (!strcmp (opt_str, "--show-graph-size"))
+    {
+      nenofex->options.show_graph_size_specified = 1;
+    }
+#if 0                           /* does not yet work */
+  else if (!strcmp (opt_str, "--print-assignment"))
+    {
+      nenofex->options.print_assignment_specified = 1;
+    }
+#endif
+  else if (!strncmp
+	   (opt_str, "--cnf-generator=", strlen ("--cnf-generator=")))
+    {
+      opt_str += strlen ("--cnf-generator=");
+      if (!strcmp (opt_str, "tseitin"))
+	{
+	  nenofex->options.cnf_generator_tseitin_specified = 1;
+	  nenofex->options.cnf_generator_tseitin_revised_specified = 0;
+	}
+      else if (!strcmp (opt_str, "tseitin_revised"))
+	{
+	  nenofex->options.cnf_generator_tseitin_revised_specified = 1;
+	  nenofex->options.cnf_generator_tseitin_specified = 0;
+	}
+      else
+	{
+	  fprintf (stderr, "Unknown option %s\n", opt_str);
+	  exit (1);
+	}
+    }
+  else if (!strncmp (opt_str, "-", 1) || !strncmp (opt_str, "--", 2))
+    {
+      fprintf (stderr, "Unknown option %s\n", opt_str);
+      exit (1);
+    }
+  else
+    {
+      fprintf (stderr, "Unknown option %s\n", opt_str);
+      exit (1);
+    }
+#ifndef NDEBUG
+  assert_solver_options (nenofex);
+#endif
+}
+
+/*
+- TODO: refinements
+- NOTE: root need not be simplified by one-level-simplification 
+- returns result (i.e. nonzero) iff the parsed formula is trivial
+*/
+NenofexResult 
+nenofex_parse (Nenofex * nenofex, FILE * input_file)
+{
+  if (nenofex->solve_called)
+    {
+      fprintf (stderr, "Must not call 'nenofex_parse' after solving!\n");
+      exit (1);
+    }
+
+  unsigned int clause_cnt = 0;
+  int closed = 1;
+  int preamble_found = 0;
+  NenofexResult result = NENOFEX_RESULT_UNKNOWN;
+  ScopeType parsed_scope_type = 0;
+  Stack *lit_stack = create_stack (nenofex->mm, DEFAULT_STACK_SIZE);
+
+  char c;
+  while ((c = fgetc (input_file)) != EOF)
+    {
+      assert (nenofex->result == NENOFEX_RESULT_UNKNOWN);
+
+      if (c == 'c')
+        {
+          while ((c = fgetc (input_file)) != EOF && c != '\n')
+            ;
+        }
+      else if (c == 'p')
+        {
+          if (preamble_found)
+            {
+              fprintf (stderr, "Preamble already occurred!\n\n");
+              exit (1);
+            }
+
+          if ((c = fgetc (input_file)) != ' ' ||
+              (c = fgetc (input_file)) != 'c' ||
+              (c = fgetc (input_file)) != 'n' ||
+              (c = fgetc (input_file)) != 'f' ||
+              (c = fgetc (input_file)) != ' ')
+            {
+              fprintf (stderr, "Malformed preamble!\n\n");
+              exit (1);
+            }
+
+          char num_vars_str[128] = { '\0' };
+          char num_clauses_str[128] = { '\0' };
+
+          fscanf (input_file, "%s", num_vars_str);
+          fscanf (input_file, "%s", num_clauses_str);
+
+          if (!is_unsigned_string (num_vars_str)
+              || !is_unsigned_string (num_clauses_str))
+            {
+              fprintf (stderr, "Malformed preamble!\n\n");
+              exit (1);
+            }
+
+          unsigned int num_vars, num_clauses;
+          num_vars = atoi (num_vars_str);
+          num_clauses = atoi (num_clauses_str);
+
+          nenofex_set_up_preamble (nenofex, num_vars, num_clauses);
+
+          preamble_found = 1;
+        }
+      else if (c == '-' || isdigit (c))
+        {
+          if (!preamble_found)
+            {
+              fprintf (stderr, "Preamble missing!\n\n");
+              exit (1);
+            }
+
+
+          closed = 0;
+
+          ungetc (c, input_file);
+
+          long int val;
+          fscanf (input_file, "%ld", &val);
+
+          if (val == 0)
+            {
+              if (!parsed_scope_type)   /* parsing a clause */
+                {
+                  clause_cnt++;
+
+                  nenofex_add_orig_clause (nenofex, lit_stack->elems, count_stack (lit_stack));
+		  assert (clause_cnt == nenofex->num_added_clauses);
+
+                  if (count_stack (lit_stack) == 0)
+                    {           /* empty clause */
+                      result = NENOFEX_RESULT_UNSAT;
+                      nenofex->result = NENOFEX_RESULT_UNSAT;
+                      goto SKIP_SIMPLIFY;
+                    }
+
+                  /*clause_closed = 1; */
+                }
+              else              /* parsing a scope */
+                {
+                  nenofex_add_orig_scope (nenofex, lit_stack->elems, count_stack (lit_stack), parsed_scope_type);
+                  parsed_scope_type = 0;
+                }
+
+              closed = 1;
+              reset_stack (lit_stack);
+            }
+          else
+            {
+              push_stack (nenofex->mm, lit_stack, (void *) val);
+            }
+        }
+      else if (c == 'a')
+        {
+          parsed_scope_type = SCOPE_TYPE_UNIVERSAL;
+          if (!closed)
+            {
+              fprintf (stderr, "Scope not closed!\n");
+              exit (1);
+            }
+        }
+      else if (c == 'e')
+        {
+          parsed_scope_type = SCOPE_TYPE_EXISTENTIAL;
+          if (!closed)
+            {
+              fprintf (stderr, "Scope not closed!\n");
+              exit (1);
+            }
+        }
+      else if (!isspace (c))
+        {
+          fprintf (stderr, "Parsing: invalid character %c\n", c);
+          exit (1);
+        }
+
+    }                           /* end: while not end of file */
+
+  assert (nenofex->result == NENOFEX_RESULT_UNKNOWN);
+
+  if (!preamble_found)
+    {
+      fprintf (stderr, "Preamble missing!\n");
+      exit (1);
+    }
+
+  if (!closed)
+    {
+      fprintf (stderr, "Scope or clause not closed!\n");
+      exit (1);
+    }
+
+  assert (clause_cnt == nenofex->num_added_clauses);
+  if (clause_cnt != nenofex->num_orig_clauses)
+    {
+      fprintf (stderr, "Numbers of clauses do not match!\n");
+      exit (1);
+    }
+
+#if 0
+  if (count_stack (nenofex->var_stack) != nenofex->num_orig_vars)
+    {
+      fprintf (stderr,
+               "Warning: Number of variables does not match! specified %d, but actually %d\n",
+               nenofex->num_orig_vars, count_stack (nenofex->var_stack));
+    }
+#endif
+
+  if (clause_cnt == 0)
+    {                           /* no clause parsed */
+      result = NENOFEX_RESULT_SAT;
+      nenofex->result = NENOFEX_RESULT_SAT;
+      goto SKIP_SIMPLIFY;
+    }
+
+  post_formula_addition_simplified (nenofex);
+
+SKIP_SIMPLIFY:
+
+  post_formula_addition_cleanup (nenofex);
+  delete_stack (nenofex->mm, lit_stack);
 
   return result;
 }
+
+void
+nenofex_set_up_preamble (Nenofex * nenofex, unsigned int num_vars,
+                 unsigned int num_clauses)
+{
+  if (nenofex->solve_called)
+    {
+      fprintf (stderr, "Must not call 'nenofex_set_up_preamble' after solving!\n");
+      exit (1);
+    }
+  if (nenofex->preamble_set_up)
+    {
+      fprintf (stderr, "Preamble must be set up exactly once!\n");
+      exit (1);
+    }
+  nenofex->preamble_set_up = 1;
+
+  size_t bytes = (num_vars + 1) * sizeof (Var *);
+  nenofex->vars = (Var **) mem_malloc (nenofex->mm, bytes);
+  assert (nenofex->vars);
+  memset (nenofex->vars, 0, bytes);
+
+  nenofex->num_orig_vars = num_vars;
+  nenofex->next_free_node_id = num_vars + 1;
+  nenofex->tseitin_next_id = num_vars + 1;
+  nenofex->num_orig_clauses = num_clauses;
+  set_cnf_root (nenofex);
+}
+
+/*
+- TODO: refinements
+*/
+void 
+nenofex_add_orig_scope (Nenofex * nenofex, void **lits, unsigned int lit_cnt,
+                ScopeType parsed_scope_type)
+{
+  if (nenofex->solve_called)
+    {
+      fprintf (stderr, "Must not call 'nenofex_add_orig_scope' after solving!\n");
+      exit (1);
+    }
+  if (!nenofex->preamble_set_up)
+    {
+      fprintf (stderr, "ERROR: preamble must be set up by 'set_up_preamble' before adding clauses!\n");
+      exit (1);
+    }
+  if (lit_cnt == 0)
+    {
+      fprintf (stderr, "ERROR: must not add empty scope!\n");
+      exit (1);
+    }
+
+  Scope *scope = new_scope (nenofex);
+  scope->type = parsed_scope_type;
+  scope->nesting = count_stack (nenofex->scopes);
+
+  unsigned int i;
+  for (i = 0; i < lit_cnt; i++)
+    {                           /* TODO: pop instead */
+      long int lit = (long int) (lits[i]);
+
+      long unsigned int check_val = (lit < 0 ? -lit : lit);
+      if (check_val > nenofex->num_orig_vars)
+	{
+	  fprintf (stderr, "Literal out of bounds!\n");
+	  exit (1);
+	}
+
+      if (lit < 0)
+        {
+          fprintf (stderr, "Variable %ld quantified negatively!\n", lit);
+          exit (1);
+        }
+
+      if (nenofex->vars[lit])
+        {
+          fprintf (stderr, "Variable %ld already quantified!\n", lit);
+          exit (1);
+        }
+
+      init_variable (nenofex, lit, scope);
+    }
+
+  push_stack (nenofex->mm, nenofex->scopes, scope);
+}
+
+/*
+- TODO: refinements
+*/
+void
+nenofex_add_orig_clause (Nenofex * nenofex, void **lits, unsigned int lit_cnt)
+{
+  if (!nenofex->preamble_set_up)
+    {
+      fprintf (stderr, "ERROR: preamble must be set up by 'set_up_preamble' before adding clauses!\n");
+      exit (1);
+    }
+
+  nenofex->num_added_clauses++;
+
+  if (lit_cnt == 0)
+    {
+      nenofex->empty_clause_added = 1;
+      return;
+    }
+
+  if (nenofex->num_added_clauses > nenofex->num_orig_clauses)
+    {
+      fprintf (stderr, "Too many clauses added!\n\n");
+      exit (1);
+    }
+
+  assert (nenofex->graph_root);
+  assert (nenofex->graph_root->size_subformula);
+
+  if (lit_cnt == 1)
+    {                           /* adding unit clause */
+      unsigned long int abs_lit = (((long int) (lits[0])) < 0 ?
+                                   -((long int) (lits[0])) : ((long
+                                                                int)
+                                                               (lits[0])));
+      if (abs_lit > nenofex->num_orig_vars)
+	{
+	  fprintf (stderr, "Literal out of bounds!\n");
+	  exit (1);
+	}
+
+      if (!nenofex->vars[abs_lit])
+        {
+          if (count_stack (nenofex->scopes) != 1)
+            fprintf (stderr,
+                     "WARNING: first occ. of var in a clause in formula which is NOT propositional!\n");
+          init_variable (nenofex, abs_lit, 0);
+        }
+
+      Node *lit_n =
+        lit_node (nenofex, ((long int) lits[0]),
+                  nenofex->vars[abs_lit]);
+      lit_n->size_subformula = 1;
+      add_node_to_child_list (nenofex, nenofex->graph_root, lit_n);
+      nenofex->graph_root->size_subformula++;
+      add_lit_node_to_occurrence_list (nenofex, lit_n);
+
+      add_orig_clause_aux (nenofex, lit_n);
+      return;
+    }                           /* end: adding unit clause */
+
+  Node *clause = or_node (nenofex);
+  add_node_to_child_list (nenofex, nenofex->graph_root, clause);
+  clause->size_subformula = 1;
+
+  unsigned int i;
+  for (i = 0; i < lit_cnt; i++)
+    {
+      long int lit = (long int) (lits[i]);
+      unsigned long int abs_lit = (lit < 0 ? -lit : lit);
+
+      if (abs_lit > nenofex->num_orig_vars)
+	{
+	  fprintf (stderr, "Literal out of bounds!\n");
+	  exit (1);
+	}
+
+      if (!nenofex->vars[abs_lit])
+        {
+          if (count_stack (nenofex->scopes) != 1)
+            fprintf (stderr,
+                     "WARNING: first occ. of var in a clause in formula which is NOT propositional!\n");
+          init_variable (nenofex, abs_lit, 0);
+        }
+
+      Node *lit_n = lit_node (nenofex, lit, nenofex->vars[abs_lit]);
+      lit_n->size_subformula = 1;
+      add_node_to_child_list (nenofex, clause, lit_n);
+      add_lit_node_to_occurrence_list (nenofex, lit_n);
+    }                           /* end: for all literals */
+  clause->size_subformula += lit_cnt;
+
+  nenofex->graph_root->size_subformula += clause->size_subformula;
+
+  /* keep first two clauses -> simplify after all clauses have been parsed */
+  if (nenofex->graph_root->num_children >= 3)
+    {
+      simplify_one_level (nenofex, clause);
+    }
+
+  add_orig_clause_aux (nenofex, clause);
+  return;
+}
+
+/* --------- END: API FUNCTIONS --------- */

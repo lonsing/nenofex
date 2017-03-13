@@ -2,7 +2,7 @@
  This file is part of Nenofex.
 
  Nenofex, an expansion-based QBF solver for negation normal form.        
- Copyright 2008, 2012 Florian Lonsing.
+ Copyright 2008, 2012, 2017 Florian Lonsing.
 
  Nenofex is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -105,10 +105,10 @@ mark_fault_node_as_deleted (FaultNode * fault_node)
 
 
 static FaultNode *
-create_fault_node (Node * node)
+create_fault_node (ATPGRedundancyRemover * atpg_rr, Node * node)
 {
   size_t bytes = sizeof (FaultNode);
-  FaultNode *result = (FaultNode *) mem_malloc (bytes);
+  FaultNode *result = (FaultNode *) mem_malloc (atpg_rr->mm, bytes);
   memset (result, 0, bytes);
   result->node = node;
   return result;
@@ -116,28 +116,30 @@ create_fault_node (Node * node)
 
 
 static void
-delete_fault_node (FaultNode * fault_node)
+delete_fault_node (ATPGRedundancyRemover * atpg_rr, FaultNode * fault_node)
 {
-  mem_free (fault_node, sizeof (FaultNode));
+  mem_free (atpg_rr->mm, fault_node, sizeof (FaultNode));
 }
 
 
 ATPGRedundancyRemover *
-create_atpg_redundancy_remover ()
+create_atpg_redundancy_remover (MemManager *mm)
 {
   ATPGRedundancyRemover *result;
   size_t bytes = sizeof (ATPGRedundancyRemover);
-  result = (ATPGRedundancyRemover *) mem_malloc (bytes);
+  result = (ATPGRedundancyRemover *) mem_malloc (mm, bytes);
   assert (result);
   memset (result, 0, bytes);
 
-  result->subformula_vars = create_stack (DEFAULT_STACK_SIZE);
-  result->fault_queue = create_queue (DEFAULT_QUEUE_SIZE);
-  result->propagation_queue = create_queue (DEFAULT_QUEUE_SIZE);
-  result->touched_nodes = create_stack (DEFAULT_STACK_SIZE);
-  result->bwd_prop_stack = create_stack (DEFAULT_STACK_SIZE);
-  result->fault_path_nodes = create_stack (DEFAULT_STACK_SIZE);
-  result->propagated_vars = create_stack (DEFAULT_STACK_SIZE);
+  result->mm = mm;
+
+  result->subformula_vars = create_stack (mm, DEFAULT_STACK_SIZE);
+  result->fault_queue = create_queue (mm, DEFAULT_QUEUE_SIZE);
+  result->propagation_queue = create_queue (mm, DEFAULT_QUEUE_SIZE);
+  result->touched_nodes = create_stack (mm, DEFAULT_STACK_SIZE);
+  result->bwd_prop_stack = create_stack (mm, DEFAULT_STACK_SIZE);
+  result->fault_path_nodes = create_stack (mm, DEFAULT_STACK_SIZE);
+  result->propagated_vars = create_stack (mm, DEFAULT_STACK_SIZE);
   return result;
 }
 
@@ -189,13 +191,13 @@ reset_atpg_redundancy_remover (ATPGRedundancyRemover * atpg_rr)
         }
 
       if (atpg_info_p->atpg_ch)
-        delete_stack (atpg_info_p->atpg_ch);
+        delete_stack (atpg_rr->mm, atpg_info_p->atpg_ch);
 
-      delete_fault_node (fault_node);
+      delete_fault_node (atpg_rr, fault_node);
     }                           /* end: for */
   assert (atpg_info_p == atpg_rr->cur_atpg_info);
 
-  mem_free (atpg_rr->atpg_info_array, atpg_rr->byte_size_atpg_info_array);
+  mem_free (atpg_rr->mm, atpg_rr->atpg_info_array, atpg_rr->byte_size_atpg_info_array);
   atpg_rr->atpg_info_array = 0;
   atpg_rr->cur_atpg_info = 0;
   atpg_rr->end_atpg_info = 0;
@@ -210,10 +212,10 @@ reset_atpg_redundancy_remover (ATPGRedundancyRemover * atpg_rr)
       var_unassign (var);
       var->atpg_mark = 0;
 
-      delete_stack (var->subformula_pos_occs);
+      delete_stack (atpg_rr->mm, var->subformula_pos_occs);
       var->subformula_pos_occs = 0;
 
-      delete_stack (var->subformula_neg_occs);
+      delete_stack (atpg_rr->mm, var->subformula_neg_occs);
       var->subformula_neg_occs = 0;
     }                           /* end: for all variables in subformula */
 
@@ -225,17 +227,17 @@ reset_atpg_redundancy_remover (ATPGRedundancyRemover * atpg_rr)
 void
 free_atpg_redundancy_remover (ATPGRedundancyRemover * atpg_rr)
 {
-  delete_stack (atpg_rr->subformula_vars);
-  delete_queue (atpg_rr->fault_queue);
-  delete_queue (atpg_rr->propagation_queue);
-  delete_stack (atpg_rr->touched_nodes);
-  delete_stack (atpg_rr->bwd_prop_stack);
-  delete_stack (atpg_rr->fault_path_nodes);
-  delete_stack (atpg_rr->propagated_vars);
+  delete_stack (atpg_rr->mm, atpg_rr->subformula_vars);
+  delete_queue (atpg_rr->mm, atpg_rr->fault_queue);
+  delete_queue (atpg_rr->mm, atpg_rr->propagation_queue);
+  delete_stack (atpg_rr->mm, atpg_rr->touched_nodes);
+  delete_stack (atpg_rr->mm, atpg_rr->bwd_prop_stack);
+  delete_stack (atpg_rr->mm, atpg_rr->fault_path_nodes);
+  delete_stack (atpg_rr->mm, atpg_rr->propagated_vars);
 
   assert (!atpg_rr->atpg_info_array);
 
-  mem_free (atpg_rr, sizeof (ATPGRedundancyRemover));
+  mem_free (atpg_rr->mm, atpg_rr, sizeof (ATPGRedundancyRemover));
 }
 
 
@@ -262,7 +264,7 @@ assign_node_atpg_info (ATPGRedundancyRemover * atpg_rr, Node * new_node)
   new_node->atpg_info = atpg_rr->cur_atpg_info++;
 
   assert (!new_node->atpg_info->fault_node);
-  new_node->atpg_info->fault_node = create_fault_node (new_node);
+  new_node->atpg_info->fault_node = create_fault_node (atpg_rr, new_node);
 
   if (!is_literal_node (new_node))
     {                           /* average case: assign watchers for operator nodes */
@@ -291,15 +293,15 @@ init_subformula_atpg_info (Nenofex * nenofex)
   assign_node_atpg_info (atpg_rr, root);
   ATPGInfo *root_atpg_info = root->atpg_info;
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (atpg_rr->mm, DEFAULT_STACK_SIZE);
 
   Node **ch, *child;
   for (ch = nenofex->changed_subformula.children; (child = *ch); ch++)
-    push_stack (stack, child);
+    push_stack (atpg_rr->mm, stack, child);
 
   if (count_stack (stack) < root->num_children)
     {                           /* not all children participate in global-flow/atpg -> collect on stack */
-      root->atpg_info->atpg_ch = create_stack (DEFAULT_STACK_SIZE);
+      root->atpg_info->atpg_ch = create_stack (atpg_rr->mm, DEFAULT_STACK_SIZE);
     }
 
   Node *cur;
@@ -312,14 +314,14 @@ init_subformula_atpg_info (Nenofex * nenofex)
       /* NOTE: this could/should be done outside while-loop -> wasting check */
       if (root_atpg_info->atpg_ch && cur->parent == root)
         {
-          push_stack (root_atpg_info->atpg_ch, cur->atpg_info->fault_node);
+          push_stack (atpg_rr->mm, root_atpg_info->atpg_ch, cur->atpg_info->fault_node);
         }
 
       if (!is_literal_node (cur))
         {
           Node *ch;
           for (ch = cur->child_list.last; ch; ch = ch->level_link.prev)
-            push_stack (stack, ch);
+            push_stack (atpg_rr->mm, stack, ch);
         }
       else
         {
@@ -329,20 +331,20 @@ init_subformula_atpg_info (Nenofex * nenofex)
           if (!var->atpg_mark)
             {                   /* collect var */
               var->atpg_mark = 1;
-              push_stack (atpg_rr->subformula_vars, var);
+              push_stack (atpg_rr->mm, atpg_rr->subformula_vars, var);
 
               assert (!var->subformula_pos_occs);
-              var->subformula_pos_occs = create_stack (DEFAULT_STACK_SIZE);
+              var->subformula_pos_occs = create_stack (atpg_rr->mm, DEFAULT_STACK_SIZE);
 
               assert (!var->subformula_neg_occs);
-              var->subformula_neg_occs = create_stack (DEFAULT_STACK_SIZE);
+              var->subformula_neg_occs = create_stack (atpg_rr->mm, DEFAULT_STACK_SIZE);
             }
 
           /* need to collect proxy occs, because must check for deleted occs */
           if (cur->lit->negated)
-            push_stack (var->subformula_neg_occs, cur->atpg_info->fault_node);
+            push_stack (atpg_rr->mm, var->subformula_neg_occs, cur->atpg_info->fault_node);
           else
-            push_stack (var->subformula_pos_occs, cur->atpg_info->fault_node);
+            push_stack (atpg_rr->mm, var->subformula_pos_occs, cur->atpg_info->fault_node);
         }
     }                           /* end: while stack not empty */
 
@@ -362,7 +364,7 @@ init_subformula_atpg_info (Nenofex * nenofex)
       assert (root_atpg_info->unassigned_ch_cnt == root->num_children);
     }
 
-  delete_stack (stack);
+  delete_stack (atpg_rr->mm, stack);
 }
 
 
@@ -379,13 +381,13 @@ collect_fault_nodes_by_dfs (Nenofex * nenofex)
   assert (root->atpg_info);
   assert (root->atpg_info->fault_node);
 
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
+  Stack *stack = create_stack (atpg_rr->mm, DEFAULT_STACK_SIZE);
   collect_faults_mark (root);
-  push_stack (stack, root);
+  push_stack (atpg_rr->mm, stack, root);
 
   Node **ch, *child;
   for (ch = nenofex->changed_subformula.children; (child = *ch); ch++)
-    push_stack (stack, child);
+    push_stack (atpg_rr->mm, stack, child);
 
   Node *cur;
   while ((cur = pop_stack (stack)))
@@ -394,27 +396,27 @@ collect_fault_nodes_by_dfs (Nenofex * nenofex)
       assert (cur->atpg_info->fault_node);
 
       if (is_literal_node (cur))
-        enqueue (atpg_rr_fault_queue, cur->atpg_info->fault_node);
+        enqueue (atpg_rr->mm, atpg_rr_fault_queue, cur->atpg_info->fault_node);
       else
         {
           if (collect_faults_marked (cur))
             {
               collect_faults_unmark (cur);
-              enqueue (atpg_rr_fault_queue, cur->atpg_info->fault_node);
+              enqueue (atpg_rr->mm, atpg_rr_fault_queue, cur->atpg_info->fault_node);
             }
           else                  /* mark and visit children */
             {
               collect_faults_mark (cur);
-              push_stack (stack, cur);
+              push_stack (atpg_rr->mm, stack, cur);
 
               Node *ch;
               for (ch = cur->child_list.last; ch; ch = ch->level_link.prev)
-                push_stack (stack, ch);
+                push_stack (atpg_rr->mm, stack, ch);
             }
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (atpg_rr->mm, stack);
 }
 
 
@@ -431,12 +433,12 @@ collect_fault_nodes_by_bfs (Nenofex * nenofex)
   assert (root->atpg_info);
   assert (root->atpg_info->fault_node);
 
-  Queue *queue = create_queue (DEFAULT_QUEUE_SIZE);
-  enqueue (atpg_rr_fault_queue, root->atpg_info->fault_node);
+  Queue *queue = create_queue (atpg_rr->mm, DEFAULT_QUEUE_SIZE);
+  enqueue (atpg_rr->mm, atpg_rr_fault_queue, root->atpg_info->fault_node);
 
   Node **ch, *child;
   for (ch = nenofex->changed_subformula.children; (child = *ch); ch++)
-    enqueue (queue, child);
+    enqueue (atpg_rr->mm, queue, child);
 
   Node *cur;
   while ((cur = dequeue (queue)))
@@ -444,18 +446,18 @@ collect_fault_nodes_by_bfs (Nenofex * nenofex)
       assert (cur->atpg_info);
       assert (cur->atpg_info->fault_node);
 
-      enqueue (atpg_rr_fault_queue, cur->atpg_info->fault_node);
+      enqueue (atpg_rr->mm, atpg_rr_fault_queue, cur->atpg_info->fault_node);
 
       if (!is_literal_node (cur))
         {
           Node *ch;
           for (ch = cur->child_list.first; ch; ch = ch->level_link.next)
-            enqueue (queue, ch);
+            enqueue (atpg_rr->mm, queue, ch);
         }
 
     }                           /* end: while queue not empty */
 
-  delete_queue (queue);
+  delete_queue (atpg_rr->mm, queue);
 }
 
 
@@ -473,13 +475,13 @@ collect_fault_nodes_bottom_up (Nenofex * nenofex)
   assert (root->atpg_info);
   assert (root->atpg_info->fault_node);
 
-  Queue *queue = create_queue (DEFAULT_QUEUE_SIZE);
-  Stack *fault_stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (fault_stack, root->atpg_info->fault_node);
+  Queue *queue = create_queue (atpg_rr->mm, DEFAULT_QUEUE_SIZE);
+  Stack *fault_stack = create_stack (atpg_rr->mm, DEFAULT_STACK_SIZE);
+  push_stack (atpg_rr->mm, fault_stack, root->atpg_info->fault_node);
 
   Node **ch, *child;
   for (ch = nenofex->changed_subformula.children; (child = *ch); ch++)
-    enqueue (queue, child);
+    enqueue (atpg_rr->mm, queue, child);
 
   assert (count_queue (queue) >= 2);
 
@@ -491,23 +493,23 @@ collect_fault_nodes_bottom_up (Nenofex * nenofex)
 
       if (!is_literal_node (cur))
         {
-          push_stack (fault_stack, cur->atpg_info->fault_node);
+          push_stack (atpg_rr->mm, fault_stack, cur->atpg_info->fault_node);
 
           Node *ch;
           for (ch = cur->child_list.first; ch; ch = ch->level_link.next)
-            enqueue (queue, ch);
+            enqueue (atpg_rr->mm, queue, ch);
         }
       else
         {
-          enqueue (atpg_rr_fault_queue, cur->atpg_info->fault_node);
+          enqueue (atpg_rr->mm, atpg_rr_fault_queue, cur->atpg_info->fault_node);
         }
     }                           /* end: while queue not empty */
 
   while ((cur = pop_stack (fault_stack)))
-    enqueue (atpg_rr_fault_queue, cur);
+    enqueue (atpg_rr->mm, atpg_rr_fault_queue, cur);
 
-  delete_queue (queue);
-  delete_stack (fault_stack);
+  delete_queue (atpg_rr->mm, queue);
+  delete_stack (atpg_rr->mm, fault_stack);
 }
 
 
@@ -522,7 +524,7 @@ collect_assigned_node (ATPGRedundancyRemover * atpg_rr, Node * node)
   if (!atpg_info->collected)
     {
       atpg_info->collected = 1;
-      push_stack (atpg_rr->touched_nodes, atpg_info);
+      push_stack (atpg_rr->mm, atpg_rr->touched_nodes, atpg_info);
     }
 }
 
@@ -656,7 +658,7 @@ fault_sensitization (ATPGRedundancyRemover * atpg_rr,
           else
             var_assign_true (var);
 
-          enqueue (atpg_rr_propagation_queue, var);
+          enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
         }
       else                      /* set children to 1 */
         {
@@ -682,7 +684,7 @@ fault_sensitization (ATPGRedundancyRemover * atpg_rr,
               else
                 var_assign_true (var);
 
-              enqueue (atpg_rr_propagation_queue, var);
+              enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
             }                   /* end: for all literal-children */
         }                       /* end: set children to 1 */
     }
@@ -703,7 +705,7 @@ fault_sensitization (ATPGRedundancyRemover * atpg_rr,
           else
             var_assign_false (var);
 
-          enqueue (atpg_rr_propagation_queue, var);
+          enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
         }
       else                      /* set children to 0 */
         {
@@ -729,7 +731,7 @@ fault_sensitization (ATPGRedundancyRemover * atpg_rr,
               else
                 var_assign_false (var);
 
-              enqueue (atpg_rr_propagation_queue, var);
+              enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
             }                   /* end: for all literal-children */
         }                       /* end: set children to 0 */
     }                           /* end: stuck-at-1 */
@@ -1137,7 +1139,7 @@ backward_propagate_truth (ATPGRedundancyRemover * atpg_rr, Node * node)
             var_assign_false (var);
           else
             var_assign_true (var);
-          enqueue (atpg_rr_propagation_queue, var);
+          enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
         }
       else                      /* check for conflict */
         {
@@ -1214,7 +1216,7 @@ backward_propagate_truth (ATPGRedundancyRemover * atpg_rr, Node * node)
   Stack *bwd_prop_stack = atpg_rr->bwd_prop_stack;
   assert (count_stack (bwd_prop_stack) == 0);
 
-  push_stack (bwd_prop_stack, node);
+  push_stack (atpg_rr->mm, bwd_prop_stack, node);
 
   while (!atpg_rr->conflict && (node = pop_stack (bwd_prop_stack)))
     {
@@ -1248,7 +1250,7 @@ backward_propagate_truth (ATPGRedundancyRemover * atpg_rr, Node * node)
               else
                 var_assign_true (var);
 
-              enqueue (atpg_rr_propagation_queue, var);
+              enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
             }
           else                  /* check for conflict */
             {
@@ -1274,7 +1276,7 @@ backward_propagate_truth (ATPGRedundancyRemover * atpg_rr, Node * node)
             {
               if (!node_assigned (ch))
                 {
-                  push_stack (bwd_prop_stack, ch);
+                  push_stack (atpg_rr->mm, bwd_prop_stack, ch);
                 }
               else if (is_or_node (ch))
                 {
@@ -1303,7 +1305,7 @@ backward_propagate_truth (ATPGRedundancyRemover * atpg_rr, Node * node)
               Node *implied_node = node->atpg_info->watcher;
               assert (implied_node);
 
-              push_stack (bwd_prop_stack, implied_node);
+              push_stack (atpg_rr->mm, bwd_prop_stack, implied_node);
 
               node->atpg_info->justified = 1;
             }
@@ -1357,7 +1359,7 @@ backward_propagate_falsity (ATPGRedundancyRemover * atpg_rr, Node * node)
             var_assign_true (var);
           else
             var_assign_false (var);
-          enqueue (atpg_rr_propagation_queue, var);
+          enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
         }
       else                      /* check for conflict */
         {
@@ -1435,7 +1437,7 @@ backward_propagate_falsity (ATPGRedundancyRemover * atpg_rr, Node * node)
   Stack *bwd_prop_stack = atpg_rr->bwd_prop_stack;
   assert (count_stack (bwd_prop_stack) == 0);
 
-  push_stack (bwd_prop_stack, node);
+  push_stack (atpg_rr->mm, bwd_prop_stack, node);
 
   while (!atpg_rr->conflict && (node = pop_stack (bwd_prop_stack)))
     {
@@ -1468,7 +1470,7 @@ backward_propagate_falsity (ATPGRedundancyRemover * atpg_rr, Node * node)
               else
                 var_assign_false (var);
 
-              enqueue (atpg_rr_propagation_queue, var);
+              enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
             }
           else                  /* check for conflict */
             {
@@ -1494,7 +1496,7 @@ backward_propagate_falsity (ATPGRedundancyRemover * atpg_rr, Node * node)
               Node *implied_node = node->atpg_info->watcher;
               assert (implied_node);
 
-              push_stack (bwd_prop_stack, implied_node);
+              push_stack (atpg_rr->mm, bwd_prop_stack, implied_node);
 
               node->atpg_info->justified = 1;
             }
@@ -1514,7 +1516,7 @@ backward_propagate_falsity (ATPGRedundancyRemover * atpg_rr, Node * node)
             {
               if (!node_assigned (ch))
                 {
-                  push_stack (bwd_prop_stack, ch);
+                  push_stack (atpg_rr->mm, bwd_prop_stack, ch);
                 }
               else if (is_and_node (ch))
                 {
@@ -2068,7 +2070,7 @@ propagate_enqueued_variable_assignments (Nenofex * nenofex)
     {
       assert (var_assigned (assigned_var));
 
-      push_stack (atpg_rr_propagated_vars, assigned_var);
+      push_stack (atpg_rr->mm, atpg_rr_propagated_vars, assigned_var);
 
       if (var_assigned_true (assigned_var))
         propagate_variable_assigned_true (nenofex, assigned_var);
@@ -2164,7 +2166,7 @@ collect_necessary_off_path_literal_at_or (Nenofex * nenofex, Node * ch)
           else
             var_assign_false (var);
 
-          enqueue (atpg_rr_propagation_queue, var);
+          enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
         }
     }
 }
@@ -2204,7 +2206,7 @@ collect_necessary_off_path_literal_at_and (Nenofex * nenofex, Node * ch)
           else
             var_assign_true (var);
 
-          enqueue (atpg_rr_propagation_queue, var);
+          enqueue (atpg_rr->mm, atpg_rr_propagation_queue, var);
         }
     }
 }
@@ -2406,7 +2408,7 @@ collect_fault_path_node (ATPGRedundancyRemover * atpg_rr,
   if (!atpg_info->fault_path_node_collected)
     {
       atpg_info->fault_path_node_collected = 1;
-      push_stack (atpg_rr->fault_path_nodes, atpg_info);
+      push_stack (atpg_rr->mm, atpg_rr->fault_path_nodes, atpg_info);
     }
 }
 
@@ -2445,7 +2447,7 @@ static int
 test_all_faults (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
 {
   FaultNode *fault_node;
-  Queue *non_redundant_faults = create_queue (DEFAULT_QUEUE_SIZE);
+  Queue *non_redundant_faults = create_queue (atpg_rr->mm, DEFAULT_QUEUE_SIZE);
 
   int redundancies_found = 0;
 
@@ -2495,7 +2497,7 @@ test_all_faults (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
                 node_atpg_info->cur_atpg_test_node_mark =
                   node_atpg_info->next_atpg_test_node_mark;
 
-              enqueue (non_redundant_faults, fault_node);
+              enqueue (atpg_rr->mm, non_redundant_faults, fault_node);
               continue;
             }
 #endif
@@ -2504,7 +2506,7 @@ test_all_faults (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
           if (!is_literal_node (fault_node->node) &&
               !is_literal_node (fault_node->node->child_list.first))
             {
-              enqueue (non_redundant_faults, fault_node);
+              enqueue (atpg_rr->mm, non_redundant_faults, fault_node);
               continue;
             }
 #endif
@@ -2513,7 +2515,7 @@ test_all_faults (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
           if (!is_literal_node (fault_node->node) &&
               !is_literal_node (fault_node->node->child_list.last))
             {
-              enqueue (non_redundant_faults, fault_node);
+              enqueue (atpg_rr->mm, non_redundant_faults, fault_node);
               continue;
             }
 #endif
@@ -2562,7 +2564,7 @@ test_all_faults (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
               node_atpg_info->cur_atpg_test_node_mark =
                 node_atpg_info->next_atpg_test_node_mark;
 #endif
-              enqueue (non_redundant_faults, fault_node);
+              enqueue (atpg_rr->mm, non_redundant_faults, fault_node);
               unmark_path_nodes (nenofex, fault_node->node, 0);
 
               if (!atpg_rr->restricted_clean_up)
@@ -2600,7 +2602,7 @@ test_all_faults (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
   /* pass all fault nodes onto following calls of optimization procedures */
   while ((fault_node = dequeue (atpg_rr->fault_queue)))
     {
-      enqueue (non_redundant_faults, fault_node);
+      enqueue (atpg_rr->mm, non_redundant_faults, fault_node);
     }
 
   /* swap queues */
@@ -2618,7 +2620,7 @@ test_all_faults (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
   -------------
 #endif
     assert (count_queue (non_redundant_faults) == 0);
-  delete_queue (non_redundant_faults);
+  delete_queue (atpg_rr->mm, non_redundant_faults);
 
   if (nenofex->options.show_opt_info_specified)
     {
@@ -2666,14 +2668,14 @@ print_atpg_graph (Nenofex * nenofex)
   if (is_literal_node (root))
     return;
 
-  Stack *stack = create_stack (1);
+  Stack *stack = create_stack (nenofex->mm, 1);
   Node *cur;
 
   Node **child;
   for (child = nenofex->changed_subformula.top_p - 1;
        child >= nenofex->changed_subformula.children; child--)
     {
-      push_stack (stack, (void *) *child);
+      push_stack (nenofex->mm, stack, (void *) *child);
     }
 
   printf ("%d (%s): ", root->id, is_or_node (root) ? "||" : "&&");
@@ -2698,7 +2700,7 @@ print_atpg_graph (Nenofex * nenofex)
           for (child = cur->child_list.last; child;
                child = child->level_link.prev)
             {
-              push_stack (stack, (void *) child);
+              push_stack (nenofex->mm, stack, (void *) child);
             }
 
           for (child = cur->child_list.first; child;
@@ -2713,7 +2715,7 @@ print_atpg_graph (Nenofex * nenofex)
           printf ("\n");
         }
     }                           /* end: while */
-  delete_stack (stack);
+  delete_stack (nenofex->mm, stack);
 }
 
 
@@ -2934,7 +2936,7 @@ unlink_and_add_implication (Nenofex * nenofex, Node * fault_node,
   { /* transformation may cause deletion of insert-node */ \
     if (insert_at->atpg_info->atpg_ch) \
     { \
-      push_stack(insert_at->atpg_info->atpg_ch, fault_node->atpg_info->fault_node); \
+      push_stack(atpg_rr->mm, insert_at->atpg_info->atpg_ch, fault_node->atpg_info->fault_node); \
     } \
     init_counter_and_watcher(insert_at); \
   }
@@ -2991,7 +2993,7 @@ transform_subformula_by_global_flow_implication (Nenofex * nenofex,
           assign_node_atpg_info (atpg_rr, insert_at);
           assert (!insert_at->atpg_info->atpg_ch);
           assert (!insert_at->atpg_info->watcher_pos);
-          enqueue (atpg_rr->fault_queue, insert_at->atpg_info->fault_node);
+          enqueue (atpg_rr->mm, atpg_rr->fault_queue, insert_at->atpg_info->fault_node);
 
           nenofex->graph_root = insert_at;
 
@@ -3042,10 +3044,10 @@ transform_subformula_by_global_flow_implication (Nenofex * nenofex,
               insert_at_atpg_info = insert_at->atpg_info;
               /* special case: 'insert_at' will get watcher list with exactly two ch. */
               insert_at_atpg_info->atpg_ch =
-                create_stack (DEFAULT_STACK_SIZE);
+                create_stack (atpg_rr->mm, DEFAULT_STACK_SIZE);
               insert_at_atpg_info->watcher_pos =
                 insert_at_atpg_info->atpg_ch->elems;
-              push_stack (insert_at_atpg_info->atpg_ch,
+              push_stack (atpg_rr->mm, insert_at_atpg_info->atpg_ch,
                           highest_implication->atpg_info->fault_node);
             }
           else                  /* has already pointer to ATPInfo -> must set up watchers */
@@ -3055,14 +3057,14 @@ transform_subformula_by_global_flow_implication (Nenofex * nenofex,
 
               insert_at_atpg_info->watcher_pos =
                 insert_at_atpg_info->atpg_ch->elems;
-              push_stack (insert_at_atpg_info->atpg_ch,
+              push_stack (atpg_rr->mm, insert_at_atpg_info->atpg_ch,
                           highest_implication->atpg_info->fault_node);
             }
 
           /* NOT sure whether this is helpful: enqueue new root ? rather not */
           assert (insert_at_atpg_info->fault_node ==
                   highest_implication->parent->atpg_info->fault_node);
-          enqueue (atpg_rr->fault_queue, insert_at_atpg_info->fault_node);
+          enqueue (atpg_rr->mm, atpg_rr->fault_queue, insert_at_atpg_info->fault_node);
 
           Node *tmp = nenofex->changed_subformula.lca;
           reset_changed_lca_object (nenofex);
@@ -3241,8 +3243,9 @@ mark_implicant_variables_for_update (Nenofex * nenofex,
                                      Node * implicant,
                                      Node * highest_implication)
 {
-  Stack *stack = create_stack (DEFAULT_STACK_SIZE);
-  push_stack (stack, implicant);
+  ATPGRedundancyRemover *atpg_rr = nenofex->atpg_rr;
+  Stack *stack = create_stack (atpg_rr->mm, DEFAULT_STACK_SIZE);
+  push_stack (atpg_rr->mm, stack, implicant);
 
   Node *node;
   while ((node = pop_stack (stack)))
@@ -3259,11 +3262,11 @@ mark_implicant_variables_for_update (Nenofex * nenofex,
         {
           Node *ch;
           for (ch = node->child_list.last; ch; ch = ch->level_link.prev)
-            push_stack (stack, ch);
+            push_stack (atpg_rr->mm, stack, ch);
         }
     }                           /* end: while stack not empty */
 
-  delete_stack (stack);
+  delete_stack (atpg_rr->mm, stack);
 }
 
 
@@ -3281,7 +3284,7 @@ static int
 optimize_by_global_flow (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
 {
   FaultNode *fault_node;
-  Queue *tested_nodes = create_queue (DEFAULT_QUEUE_SIZE);
+  Queue *tested_nodes = create_queue (atpg_rr->mm, DEFAULT_QUEUE_SIZE);
   Node *highest_implication;
   ATPGFaultType fault_type = 0;
   int implications_found = 0;
@@ -3321,7 +3324,7 @@ optimize_by_global_flow (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
           if (!is_literal_node (node)
               && !is_literal_node (node->child_list.first))
             {
-              enqueue (tested_nodes, fault_node);
+              enqueue (atpg_rr->mm, tested_nodes, fault_node);
               continue;
             }
 #endif
@@ -3330,7 +3333,7 @@ optimize_by_global_flow (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
           if (!is_literal_node (node)
               && !is_literal_node (node->child_list.last))
             {
-              enqueue (tested_nodes, fault_node);
+              enqueue (atpg_rr->mm, tested_nodes, fault_node);
               continue;
             }
 #endif
@@ -3396,7 +3399,7 @@ optimize_by_global_flow (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
               continue_optimizing = 1;
 
               /* always enqueue tested nodes */
-              enqueue (tested_nodes, fault_node);
+              enqueue (atpg_rr->mm, tested_nodes, fault_node);
 
               assert (!nenofex->atpg_rr_abort);
 
@@ -3451,7 +3454,7 @@ optimize_by_global_flow (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
                   goto LITERAL_NODE_SECOND_PHASE;
                 }
 #endif
-              enqueue (tested_nodes, fault_node);
+              enqueue (atpg_rr->mm, tested_nodes, fault_node);
             }                   /* end: no implication found */
 
         }                       /* end: while fault-queue not empty */
@@ -3470,7 +3473,7 @@ optimize_by_global_flow (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
   /* pass all fault nodes onto following calls of optimization procedures */
   while ((fault_node = dequeue (atpg_rr->fault_queue)))
     {
-      enqueue (tested_nodes, fault_node);
+      enqueue (atpg_rr->mm, tested_nodes, fault_node);
     }
 
   /* swap queues */
@@ -3479,7 +3482,7 @@ optimize_by_global_flow (Nenofex * nenofex, ATPGRedundancyRemover * atpg_rr)
   tested_nodes = tmp;
 
   assert (count_queue (tested_nodes) == 0);
-  delete_queue (tested_nodes);
+  delete_queue (atpg_rr->mm, tested_nodes);
 
   if (nenofex->options.show_opt_info_specified)
     {
@@ -3605,7 +3608,7 @@ allocate_atpg_info_pointers (Nenofex * nenofex)
   assert (atpg_rr->byte_size_atpg_info_array);
 
   atpg_rr->atpg_info_array =
-    (ATPGInfo *) mem_malloc (atpg_rr->byte_size_atpg_info_array);
+    (ATPGInfo *) mem_malloc (atpg_rr->mm, atpg_rr->byte_size_atpg_info_array);
   assert (atpg_rr->atpg_info_array);
 
   atpg_rr->cur_atpg_info = atpg_rr->atpg_info_array;

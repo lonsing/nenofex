@@ -2,7 +2,7 @@
  This file is part of Nenofex.
 
  Nenofex, an expansion-based QBF solver for negation normal form.        
- Copyright 2008, 2012 Florian Lonsing.
+ Copyright 2008, 2012, 2017 Florian Lonsing.
 
  Nenofex is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -22,18 +22,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include "queue.h"
-#include "mem.h"
 
 Queue *
-create_queue (unsigned int size)
+create_queue (MemManager *mm, unsigned int size)
 {
   size_t bytes = sizeof (Queue);
-  Queue *result = (Queue *) mem_malloc (bytes);
+  Queue *result = (Queue *) mem_malloc (mm, bytes);
   assert (result);
 
   size = size ? size : 1;
   bytes = size * sizeof (void *);
-  result->elems = (void **) mem_malloc (bytes);
+  result->elems = (void **) mem_malloc (mm, bytes);
   assert (result->elems);
   memset (result->elems, 0, bytes);
 
@@ -45,10 +44,10 @@ create_queue (unsigned int size)
 
 
 void
-delete_queue (Queue * queue)
+delete_queue (MemManager *mm, Queue * queue)
 {
-  mem_free (queue->elems, size_queue (queue) * sizeof (void *));
-  mem_free (queue, sizeof (Queue));
+  mem_free (mm, queue->elems, size_queue (queue) * sizeof (void *));
+  mem_free (mm, queue, sizeof (Queue));
 }
 
 
@@ -70,14 +69,14 @@ count_queue (Queue * queue)
 
 
 static void
-enlarge_queue (Queue * queue)
+enlarge_queue (MemManager *mm, Queue * queue)
 {
   assert (queue->last == queue->first || queue->first == queue->elems);
 
   unsigned int new_size = size_queue (queue) * 2;
   assert (new_size);
   size_t bytes = new_size * sizeof (void *);
-  void **new_elems = (void **) mem_malloc (bytes);
+  void **new_elems = (void **) mem_malloc (mm, bytes);
   assert (new_elems);
   void **new_last = new_elems;
 
@@ -88,7 +87,7 @@ enlarge_queue (Queue * queue)
         queue->first = queue->elems;
     }
   while (queue->first != queue->last);
-  mem_free (queue->elems, size_queue (queue) * sizeof (void *));
+  mem_free (mm, queue->elems, size_queue (queue) * sizeof (void *));
 
   queue->elems = queue->first = new_elems;
   queue->end = queue->elems + new_size;
@@ -102,7 +101,7 @@ enlarge_queue (Queue * queue)
 
 
 void
-enqueue (Queue * queue, void *elem)
+enqueue (MemManager *mm, Queue * queue, void *elem)
 {
   assert (count_queue (queue) != 0 || queue->first == queue->last);
   assert (count_queue (queue) == 0 || queue->first != queue->last);
@@ -112,11 +111,11 @@ enqueue (Queue * queue, void *elem)
   *queue->last++ = elem;
 
   if (queue->last == queue->first)
-    enlarge_queue (queue);
+    enlarge_queue (mm, queue);
   else if (queue->last == queue->end)
     {
       if (queue->first == queue->elems)
-        enlarge_queue (queue);
+        enlarge_queue (mm, queue);
       else
         queue->last = queue->elems;
     }
