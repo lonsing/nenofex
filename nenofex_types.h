@@ -30,14 +30,12 @@
 typedef struct Node Node;
 typedef struct Var Var;
 typedef struct Lit Lit;
-typedef enum NodeType NodeType;
 typedef struct LevelLink LevelLink;
 typedef struct OccurrenceLink OccurrenceLink;
 typedef struct ChildList ChildList;
 typedef struct OccurrenceList OccurrenceList;
 typedef struct Scope Scope;
 typedef struct LCAObject LCAObject;
-typedef enum VarAssignment VarAssignment;
 typedef struct SameLCALink SameLCALink;
 typedef struct VarLCAList VarLCAList;
 
@@ -47,8 +45,6 @@ typedef struct VarLCAList VarLCAList;
 typedef struct ATPGRedundancyRemover ATPGRedundancyRemover;
 typedef struct ATPGInfo ATPGInfo;
 typedef struct FaultNode FaultNode;
-typedef enum ATPGAssignment ATPGAssignment;
-typedef enum ATPGFaultType ATPGFaultType;
 
 /*
 - represents LCA of all occurrences of a variable
@@ -70,6 +66,8 @@ enum NodeType
   NODE_TYPE_OR = 2,
   NODE_TYPE_AND = 3
 };
+
+typedef enum NodeType NodeType;
 
 #define is_literal_node(node) ((node)->type == NODE_TYPE_LITERAL)
 #define is_operator_node(node) ((node)->type != NODE_TYPE_LITERAL)
@@ -131,6 +129,8 @@ enum VarAssignment
   VAR_ASSIGNMENT_FALSE = 1,
   VAR_ASSIGNMENT_TRUE = 2
 };
+
+typedef enum VarAssignment VarAssignment;
 
 #define var_assigned(var) ((var)->assignment)
 #define var_assigned_true(var) ((var)->assignment == VAR_ASSIGNMENT_TRUE)
@@ -325,7 +325,7 @@ struct Nenofex
     int opt_subgraph_limit_specified;
     int opt_subgraph_limit;
 
-    int univ_trigger_abs:1;
+    unsigned int univ_trigger_abs:1;
     int univ_trigger;
     int univ_trigger_delta;
 
@@ -502,18 +502,13 @@ void collect_assigned_node (ATPGRedundancyRemover * atpg_rr, Node * node);
 #define node_assign_false(node) \
   ((node)->atpg_info->assignment = ATPG_ASSIGNMENT_FALSE)
 
-enum ATPGAssignment
-{
-  ATPG_ASSIGNMENT_UNDEFINED = 0,
-  ATPG_ASSIGNMENT_FALSE = 1,
-  ATPG_ASSIGNMENT_TRUE = 2
-};
-
 enum ATPGFaultType
 {
   ATPG_FAULT_TYPE_STUCK_AT_0 = 0,
   ATPG_FAULT_TYPE_STUCK_AT_1 = 1
 };
+
+typedef enum ATPGFaultType ATPGFaultType;
 
 /*
 - a 'FaultNode' 'encapsulates' a real graph node
@@ -527,6 +522,15 @@ struct FaultNode
   unsigned int deleted:1;
   unsigned int skip:1;
 };
+
+enum ATPGAssignment
+{
+  ATPG_ASSIGNMENT_UNDEFINED = 0,
+  ATPG_ASSIGNMENT_FALSE = 1,
+  ATPG_ASSIGNMENT_TRUE = 2
+};
+
+typedef enum ATPGAssignment ATPGAssignment;
 
 struct ATPGInfo
 {

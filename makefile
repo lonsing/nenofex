@@ -1,4 +1,4 @@
-CFLAGS=-std=c99 -Wextra -Wall -Wno-unused -O3 -DNDEBUG
+CFLAGS=-std=c99 -Wextra -Wall -Wno-unused -O3 -DNDEBUG -pedantic
 #CFLAGS=-std=c99 -Wextra -Wall -Wno-unused -g3
 #CFLAGS=-std=c99 -Wextra -Wall -Wno-unused -g3 -pg -ftest-coverage -fprofile-arcs -DNDEBUG
 

@@ -22,8 +22,6 @@
 #define _NENOFEX_H_
 
 typedef struct Nenofex Nenofex;
-typedef enum NenofexResult NenofexResult;
-typedef enum ScopeType ScopeType;
 
 enum NenofexResult
 {
@@ -37,6 +35,9 @@ enum ScopeType
   SCOPE_TYPE_EXISTENTIAL = 1,
   SCOPE_TYPE_UNIVERSAL = 2
 };
+
+typedef enum NenofexResult NenofexResult;
+typedef enum ScopeType ScopeType;
 
 /****************************************************************************
 IMPORTANT NOTE: please see also the example program
