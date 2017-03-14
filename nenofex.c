@@ -10115,9 +10115,10 @@ expansion_phase (Nenofex * nenofex)
         {
           if (var->exp_costs.score > cost_cutoff)
             {
-              fprintf (stderr,
-                       "\n\tCOST CUTOFF: cutoff = %d, current cost = %d\n\n",
-                       cost_cutoff, var->exp_costs.score);
+              if (!nenofex->options.print_short_answer_specified)
+                fprintf (stderr,
+                         "\n\tCOST CUTOFF: cutoff = %d, current cost = %d\n\n",
+                         cost_cutoff, var->exp_costs.score);
               break;
             }
         }                       /* end: cost_cutoff specified */
@@ -10226,10 +10227,11 @@ expansion_phase (Nenofex * nenofex)
                   (size_before_expansion *
                    (1 + nenofex->options.size_cutoff)))
                 {
-                  fprintf (stderr,
-                           "\n\tSIZE CUTOFF: cutoff = %f, before = %d, after = %d\n\n",
-                           nenofex->options.size_cutoff,
-                           size_before_expansion, size_after_expansion);
+                  if (!nenofex->options.print_short_answer_specified)
+                    fprintf (stderr,
+                             "\n\tSIZE CUTOFF: cutoff = %f, before = %d, after = %d\n\n",
+                             nenofex->options.size_cutoff,
+                             size_before_expansion, size_after_expansion);
                   break;
                 }
             }
@@ -10238,10 +10240,11 @@ expansion_phase (Nenofex * nenofex)
               if (size_after_expansion >
                   (size_before_expansion + nenofex->options.size_cutoff))
                 {
-                  fprintf (stderr,
-                           "\n\tSIZE CUTOFF: cutoff = %f, size before = %d, size after = %d\n\n",
-                           nenofex->options.size_cutoff,
-                           size_before_expansion, size_after_expansion);
+                  if (!nenofex->options.print_short_answer_specified)
+                    fprintf (stderr,
+                             "\n\tSIZE CUTOFF: cutoff = %f, size before = %d, size after = %d\n\n",
+                             nenofex->options.size_cutoff,
+                             size_before_expansion, size_after_expansion);
                   break;
                 }
             }
@@ -10254,10 +10257,11 @@ expansion_phase (Nenofex * nenofex)
               nenofex->graph_root->size_subformula > 
               nenofex->options.abs_graph_size_cutoff * nenofex->init_graph_size)
             {
-              fprintf (stderr,
-                       "\n\tGRAPH SIZE CUTOFF: cutoff = %f, init size = %d, cur size = %d\n\n",
-                       nenofex->options.abs_graph_size_cutoff,
-                       nenofex->init_graph_size, nenofex->graph_root->size_subformula);
+              if (!nenofex->options.print_short_answer_specified)
+                fprintf (stderr,
+                         "\n\tGRAPH SIZE CUTOFF: cutoff = %f, init size = %d, cur size = %d\n\n",
+                         nenofex->options.abs_graph_size_cutoff,
+                         nenofex->init_graph_size, nenofex->graph_root->size_subformula);
               break;
             }
         }
@@ -10303,9 +10307,12 @@ sat_solving_phase (Nenofex * nenofex)
           int sat_res = sat_solver_sat (nenofex);
 
           if (sat_res == SAT_SOLVER_RESULT_UNKNOWN)
-            fprintf (stderr,
-                     "\n\tSAT solver result unknown due to decision limit %u\n\n",
-                     nenofex->options.sat_solver_dec_limit);
+            {
+              if (!nenofex->options.print_short_answer_specified)
+                fprintf (stderr,
+                         "\n\tSAT solver result unknown due to decision limit %u\n\n",
+                         nenofex->options.sat_solver_dec_limit);
+            }
           nenofex->stats.sat_solver_decisions = picosat_decisions (nenofex->picosat);
 
           nenofex->result = sat_res;
