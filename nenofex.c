@@ -10679,12 +10679,15 @@ nenofex_solve (Nenofex *nenofex)
     }
   nenofex->solve_called = 1;
 
+#if 0
+  /* It should not matter if fewer clauses are added than were declared before. */
   if (!nenofex->empty_clause_added &&
       nenofex->num_added_clauses != nenofex->num_orig_clauses)
     {
       fprintf (stderr, "Numbers of declared and added clauses do not match!\n");
       exit (1);
     }
+#endif
 
   /* Must cleanup regardless of whether added formula is trivial or not. */
   post_formula_addition_cleanup (nenofex);
@@ -11241,11 +11244,14 @@ nenofex_parse (Nenofex * nenofex, FILE * input_file)
     }
 
   assert (clause_cnt == nenofex->num_added_clauses);
+#if 0
+  /* It should not matter if fewer clauses are added than were declared before. */
   if (clause_cnt != nenofex->num_orig_clauses)
     {
       fprintf (stderr, "Numbers of clauses do not match!\n");
       exit (1);
     }
+#endif
 
 #if 0
   if (count_stack (nenofex->var_stack) != nenofex->num_orig_vars)
@@ -11401,7 +11407,8 @@ nenofex_add_orig_clause (Nenofex * nenofex, void **lits, unsigned int lit_cnt)
 
       if (!nenofex->vars[abs_lit])
         {
-          if (count_stack (nenofex->scopes) != 1)
+          if (count_stack (nenofex->scopes) != 1 && 
+              !nenofex->options.print_short_answer_specified)
             fprintf (stderr,
                      "WARNING: first occ. of var in a clause in formula which is NOT propositional!\n");
           init_variable (nenofex, abs_lit, 0);
