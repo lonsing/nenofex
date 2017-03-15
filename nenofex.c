@@ -8635,6 +8635,9 @@ simplify_eliminate_units (Nenofex * nenofex)
         {
           exist_cnt++;
 
+          if (nenofex->options.show_progress_specified)
+            fprintf (stderr, "Found exist. unit literal %d at root-AND\n", var->id);
+
           if (literal_lit->negated)
             {                   /* eliminate negative unit literal -> set variable to false */
               assert (lit->negated);
@@ -8677,7 +8680,7 @@ simplify_eliminate_units (Nenofex * nenofex)
       else                      /* universal unit literal */
         {
           if (nenofex->options.show_progress_specified)
-            fprintf (stderr, "Found univ. unit literal at root-AND\n");
+            fprintf (stderr, "Found univ. unit literal %d at root-AND\n", var->id);
           simplify_universal_unit (nenofex);
           break;
         }
@@ -8688,7 +8691,7 @@ simplify_eliminate_units (Nenofex * nenofex)
     }                           /* end: while unit literals present */
 
   if (nenofex->options.show_progress_specified && exist_cnt)
-    fprintf (stderr, "Found %d exist. unit literals at root-AND\n",
+    fprintf (stderr, "  Found %d exist. unit literals at root-AND\n",
              exist_cnt);
 
   if (node_stack)
@@ -9956,6 +9959,11 @@ expansion_phase (Nenofex * nenofex)
       (nenofex->graph_root->size_subformula *
        nenofex->options.univ_trigger_delta / 100);
 
+  /* Flag to indicate that expansion phase is aborted prematurely due
+     to user-specific limit (except cost-limit, where cutoff occurs
+     before next expansion). */
+  unsigned int cutoff_occurred = 0;
+
   nenofex->cur_expansions = 0;
   while (nenofex->result == NENOFEX_RESULT_UNKNOWN && ((full && !limit) || (full && limit && nenofex->cur_expansions < nenofex->options.num_expansions) || (!full && !limit && !nenofex->is_existential && !nenofex->is_universal) ||   /* std. case */
                                                        (!full && limit
@@ -10090,6 +10098,15 @@ expansion_phase (Nenofex * nenofex)
           continue;
         }
       /* end: check if formula is existential */
+
+      /* NOTE: if cutoff occurs after expansion due to ANY
+	 user-specific limit (except cost-limit, which takes effect
+	 before an expansion), then we must not exit loop immediately
+	 but enter another iteration and proceed until here since
+	 simplifications are performed to properly set up counters
+	 etc. */
+      if (cutoff_occurred)
+	break;
 
       if (nenofex->graph_root)
         size_before_expansion = nenofex->graph_root->size_subformula;
@@ -10232,7 +10249,8 @@ expansion_phase (Nenofex * nenofex)
                              "\n\tSIZE CUTOFF: cutoff = %f, before = %d, after = %d\n\n",
                              nenofex->options.size_cutoff,
                              size_before_expansion, size_after_expansion);
-                  break;
+		  assert (!cutoff_occurred);
+                  cutoff_occurred = 1;
                 }
             }
           else                  /* absolute cutoff */
@@ -10245,7 +10263,8 @@ expansion_phase (Nenofex * nenofex)
                              "\n\tSIZE CUTOFF: cutoff = %f, size before = %d, size after = %d\n\n",
                              nenofex->options.size_cutoff,
                              size_before_expansion, size_after_expansion);
-                  break;
+		  assert (!cutoff_occurred);
+		  cutoff_occurred = 1;
                 }
             }
         }                       /* end: size_cutoff specified */
@@ -10262,7 +10281,8 @@ expansion_phase (Nenofex * nenofex)
                          "\n\tGRAPH SIZE CUTOFF: cutoff = %f, init size = %d, cur size = %d\n\n",
                          nenofex->options.abs_graph_size_cutoff,
                          nenofex->init_graph_size, nenofex->graph_root->size_subformula);
-              break;
+	      assert (!cutoff_occurred);
+	      cutoff_occurred = 1;
             }
         }
 
