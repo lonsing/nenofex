@@ -56,8 +56,8 @@ libnenofex.a: nenofex.o stack.o queue.o mem.o atpg.o ../picosat/picosat.o
 libnenofex.so.$(VERSION): nenofex.fpico stack.fpico queue.fpico mem.fpico atpg.fpico
 	$(CC) $(LFLAGS) -shared -Wl,$(SONAME),libnenofex.so.$(MAJOR) $^ -o $@
 
-libnenofex.$(VERSION).dylib: libnenofex.so.$(VERSION)
-	cp $< $@
+libnenofex.$(VERSION).dylib: nenofex.fpico stack.fpico queue.fpico mem.fpico atpg.fpico
+	$(CC) $(LFLAGS) -shared -Wl,$(SONAME),libnenofex.$(MAJOR).dylib $^ -o $@
 
 clean:
 	rm -f *.fpico *.out *.gcda *.gcno *.gcov *.o *.a
