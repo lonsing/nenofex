@@ -5747,7 +5747,7 @@ expand_universal_variable (Nenofex * nenofex, Var * var)
                   add_node_to_child_list (nenofex, lca_object_lca, copy);
                   update_size_delta += copy->size_subformula;
                   assert (!is_literal_node ((child))
-                          || (child)->lit->var == var);
+                          || (child)->lit->var != var);
 
                   add_lca_child (nenofex, &changed_subformula_new, child);
                   add_lca_child (nenofex, &changed_subformula_new, copy);
@@ -5873,7 +5873,7 @@ expand_universal_variable (Nenofex * nenofex, Var * var)
                   add_node_to_child_list (nenofex, lca_object_lca, copy);
                   update_size_delta += copy->size_subformula;
                   assert (!is_literal_node ((child))
-                          || (child)->lit->var == var);
+                          || (child)->lit->var != var);
 
                   add_lca_child (nenofex, &changed_subformula_new, child);
                   add_lca_child (nenofex, &changed_subformula_new, copy);
