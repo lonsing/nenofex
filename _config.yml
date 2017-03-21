@@ -1,0 +1,8 @@
+title: Nenofex
+description: Nenofex, an expansion-based QBF solver for negation normal form
+google_analytics: 
+show_downloads: true
+theme: jekyll-theme-slate
+
+gems:
+  - jekyll-mentions
